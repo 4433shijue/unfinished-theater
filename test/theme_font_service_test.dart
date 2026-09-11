@@ -24,8 +24,9 @@ void main() {
       () async {
     var attempts = 0;
     final fonts = ThemeFontService(load: (family, _) async {
-      if (family == 'AbyssSerif' && attempts++ == 0)
+      if (family == 'AbyssSerif' && attempts++ == 0) {
         throw StateError('offline');
+      }
     });
     await fonts.ensure('FlowerWenDingKai');
     await expectLater(fonts.ensure('AbyssSerif'), throwsStateError);
