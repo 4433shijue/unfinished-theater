@@ -1,0 +1,5 @@
+# Copy to key.properties. Paths are relative to android/; use forward slashes.
+storeFile=release.jks
+storePassword=REPLACE_ME
+keyAlias=release
+keyPassword=REPLACE_ME

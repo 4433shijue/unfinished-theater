@@ -1,0 +1,33 @@
+* text=auto
+
+*.dart text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.js text eol=lf
+*.html text eol=lf
+*.xml text eol=lf
+*.kts text eol=lf
+*.kt text eol=lf
+*.properties text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.gitignore text eol=lf
+*.gitattributes text eol=lf
+
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ttf binary
+*.otf binary
+*.jar binary
+*.apk binary
+*.zip binary
+
+# Preserve the verbatim embedded third-party license, including its whitespace.
+assets/licenses/ARPHIC-PUBLIC-LICENSE.txt -whitespace

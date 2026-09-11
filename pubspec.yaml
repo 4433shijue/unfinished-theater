@@ -1,0 +1,86 @@
+name: ai_roleplay_chat
+description: Privacy-first AI roleplay chat application for Android and Web.
+publish_to: 'none'
+version: 2.10.5+2105
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_markdown_plus: ^1.0.7
+  flutter_widget_from_html_core: ^0.17.2
+  file_picker: ^10.3.8
+  http: ^1.6.0
+  just_audio: ^0.10.5
+  just_audio_web: ^0.4.16
+  markdown: ^7.3.0
+  path_provider: ^2.1.5
+  provider: ^6.1.5+1
+  share_plus: ^12.0.2
+  shared_preferences: ^2.5.5
+  shared_preferences_platform_interface: ^2.4.2
+  uuid: ^4.5.3
+  web: ^1.1.1
+  webview_flutter: ^4.8.0
+  flutter_web_plugins:
+    sdk: flutter
+  archive: ^4.0.9
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/licenses/
+    - assets/bubble_skins/
+    - assets/theme_skins/april_fools/backgrounds/
+    - assets/theme_skins/april_fools/avatars/
+    - assets/theme_skins/april_fools/buttons/
+    - assets/theme_skins/cthulhu/backgrounds/
+    - assets/theme_skins/cthulhu/avatars/
+    - assets/theme_skins/cthulhu/buttons/
+    - assets/theme_skins/rift_relay/backgrounds/
+    - assets/theme_skins/rift_relay/avatars/
+    - assets/theme_skins/rift_relay/buttons/
+    - assets/theme_skins/flower_not_flower/backgrounds/
+    - assets/theme_skins/flower_not_flower/avatars/
+    - assets/theme_skins/flower_not_flower/buttons/
+    - assets/theme_skins/mechanical_city/backgrounds/
+    - assets/theme_skins/mechanical_city/avatars/
+    - assets/theme_skins/mechanical_city/buttons/
+    - assets/theme_skins/rain_radio/backgrounds/
+    - assets/theme_skins/rain_radio/avatars/
+    - assets/theme_skins/rain_radio/buttons/
+    - assets/theme_skins/sky_pasture/backgrounds/
+    - assets/theme_skins/sky_pasture/avatars/
+    - assets/theme_skins/sky_pasture/buttons/
+    - assets/theme_skins/vinyl_memories/backgrounds/
+    - assets/theme_skins/vinyl_memories/avatars/
+    - assets/theme_skins/vinyl_memories/buttons/
+  fonts:
+    - family: FlowerWenDingKai
+      fonts:
+        - asset: assets/fonts/gkai00mp-2.ttf
+    - family: AbyssSerif
+      fonts:
+        - asset: assets/fonts/SourceHanSerifCN-Regular.otf
+    - family: AbyssLogo
+      fonts:
+        - asset: assets/fonts/ZhanKuXiaoLOGOTi.otf
+    - family: RiftSans
+      fonts:
+        - asset: assets/fonts/SourceHanSansSC-Regular.otf
+    - family: RiftCombat
+      fonts:
+        - asset: assets/fonts/ZiTiChuanQiTeZhanTi.ttf
+    - family: PastureXiaolai
+      fonts:
+        - asset: assets/fonts/Xiaolai-Regular.ttf
+    - family: VinylWenkai
+      fonts:
+        - asset: assets/fonts/LXGWWenKai-Regular.ttf

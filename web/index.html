@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="未完剧场：本地优先的 AI 角色扮演聊天与文字游戏模拟器。">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="未完剧场">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>未完剧场</title>
+  <link rel="manifest" href="manifest.json">
+  <link
+    rel="preload"
+    href="assets/assets/fonts/gkai00mp-2.ttf"
+    as="font"
+    type="font/ttf"
+    crossorigin>
+  <style>
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      background: #f6f3f7;
+    }
+
+    #boot-status {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      box-sizing: border-box;
+      color: #29242c;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      text-align: center;
+    }
+
+    #boot-status-main {
+      width: min(100%, 420px);
+    }
+
+    #boot-status-mark {
+      width: 44px;
+      height: 44px;
+      margin: 0 auto 20px;
+      border: 3px solid rgba(113, 91, 122, 0.22);
+      border-top-color: #715b7a;
+      border-radius: 50%;
+      animation: boot-spin 0.9s linear infinite;
+    }
+
+    #boot-status h1 {
+      margin: 0;
+      font-size: 26px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    #boot-status-message {
+      margin: 12px 0 0;
+      color: #6c6370;
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    #boot-retry {
+      display: none;
+      margin: 22px auto 0;
+      padding: 10px 18px;
+      border: 1px solid #715b7a;
+      border-radius: 6px;
+      background: #715b7a;
+      color: #fff;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    @keyframes boot-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #boot-status-mark { animation: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="boot-status" role="status" aria-live="polite">
+    <div id="boot-status-main">
+      <div id="boot-status-mark" aria-hidden="true"></div>
+      <h1>未完剧场</h1>
+      <p id="boot-status-message">正在准备舞台</p>
+      <button id="boot-retry" type="button" onclick="location.reload()">重新加载</button>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var flutterViewObserver = new MutationObserver(function () {
+        if (!document.querySelector('flutter-view')) {
+          return;
+        }
+        flutterViewObserver.disconnect();
+        window.setTimeout(function () {
+          var bootStatus = document.getElementById('boot-status');
+          if (bootStatus) {
+            bootStatus.style.display = 'none';
+            bootStatus.setAttribute('aria-hidden', 'true');
+          }
+        }, 500);
+      });
+      flutterViewObserver.observe(document.body, { childList: true });
+
+      var stablePrefix = 'wwjc.flutter.';
+      var backupKey = 'wwjc.shared_preferences.backup.v1';
+      var dbName = 'wwjc-durable-storage';
+      var storeName = 'snapshots';
+      var bootStarted = false;
+      var bootFallbackTimer = window.setTimeout(boot, 4000);
+
+      window.setTimeout(function () {
+        var status = document.getElementById('boot-status-message');
+        var retry = document.getElementById('boot-retry');
+        if (!status || !retry) {
+          return;
+        }
+        status.textContent = '启动时间较长，可以重新加载；本地存档不会被清除。';
+        retry.style.display = 'block';
+      }, 15000);
+
+      function openDb() {
+        return new Promise(function (resolve) {
+          if (!window.indexedDB) {
+            resolve(null);
+            return;
+          }
+          var request = indexedDB.open(dbName, 1);
+          request.onupgradeneeded = function () {
+            request.result.createObjectStore(storeName);
+          };
+          request.onsuccess = function () {
+            resolve(request.result);
+          };
+          request.onerror = function () {
+            resolve(null);
+          };
+        });
+      }
+
+      function readIndexedBackup(db) {
+        return new Promise(function (resolve) {
+          if (!db) {
+            resolve(null);
+            return;
+          }
+          var tx = db.transaction(storeName, 'readonly');
+          var request = tx.objectStore(storeName).get(backupKey);
+          request.onsuccess = function () {
+            resolve(request.result || null);
+          };
+          request.onerror = function () {
+            resolve(null);
+          };
+        });
+      }
+
+      function restoreBackup(raw) {
+        if (!raw) {
+          return;
+        }
+        try {
+          var parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          Object.keys(parsed).forEach(function (key) {
+            if (key.indexOf(stablePrefix) === 0 &&
+                localStorage.getItem(key) === null) {
+              localStorage.setItem(key, parsed[key]);
+            }
+          });
+        } catch (_) {}
+      }
+
+      function boot() {
+        if (bootStarted) {
+          return;
+        }
+        bootStarted = true;
+        window.clearTimeout(bootFallbackTimer);
+        var script = document.createElement('script');
+        script.src = 'flutter_bootstrap.js';
+        script.async = true;
+        document.body.appendChild(script);
+      }
+
+      openDb().then(function (db) {
+        restoreBackup(localStorage.getItem(backupKey));
+        return readIndexedBackup(db).then(function (indexedBackup) {
+          restoreBackup(indexedBackup);
+          if (db) {
+            db.close();
+          }
+          boot();
+        });
+      }).catch(boot);
+    }());
+  </script>
+  <!--
+    You can customize the "flutter_bootstrap.js" script.
+    This is useful to provide a custom configuration to the Flutter loader
+    or to give the user feedback during the initialization process.
+
+    For more details:
+    * https://docs.flutter.dev/platform-integration/web/initialization
+  -->
+</body>
+</html>
