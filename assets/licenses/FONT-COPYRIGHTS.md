@@ -20,3 +20,9 @@ Copyright © 2017 Adobe Systems Incorporated (http://www.adobe.com/), with Reser
 Copyright 2020-2024 LXGW (https://github.com/lxgw/kose-font)
 
 Copyright 2014 Nozomi Seto (https://ja.osdn.net/projects/setofont/)
+
+## TheaterBootstrapSans.otf
+
+Derived from SourceHanSansSC-Regular.otf, Copyright 2014–2021 Adobe. Distributed under SIL OFL 1.1.
+
+This modified subset is renamed Theater Bootstrap Sans to respect the reserved font name. It includes GB2312 characters and characters present in the application source. The Flutter family alias Roboto prevents an extra startup download of the framework default font; this file is not the Google Roboto typeface.

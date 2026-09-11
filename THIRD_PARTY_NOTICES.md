@@ -35,3 +35,5 @@
 - [小赖字体](https://github.com/lxgw/kose-font)
 - [站酷小薇 LOGO 体官方说明](https://www.zcool.com.cn/assets/ZNzg0OA%3D%3D)
 - 字体传奇特战体的字体内部标注作者网站 `www.ziticq.com`；本次未能取得网站上的完整授权附件，二次分发字体本身前请向原作者核实。
+
+启动基础字体 `TheaterBootstrapSans.otf` 是思源黑体的改名子集，继续采用 SIL OFL 1.1，详见 `assets/licenses/FONT-COPYRIGHTS.md`。原始主题字体保留，按当前主题加载。

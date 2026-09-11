@@ -31,12 +31,6 @@
 
   <title>未完剧场</title>
   <link rel="manifest" href="manifest.json">
-  <link
-    rel="preload"
-    href="assets/assets/fonts/gkai00mp-2.ttf"
-    as="font"
-    type="font/ttf"
-    crossorigin>
   <style>
     html, body {
       width: 100%;
@@ -120,37 +114,48 @@
   </div>
   <script>
     (function () {
-      var flutterViewObserver = new MutationObserver(function () {
-        if (!document.querySelector('flutter-view')) {
-          return;
+      var stage = '正在读取本地存档';
+      var finished = false;
+      var failed = false;
+      var status = document.getElementById('boot-status-message');
+      var retry = document.getElementById('boot-retry');
+      var slowTimer;
+      window.theaterBoot = {
+        stage: function (message) {
+          if (finished || failed) return;
+          stage = message;
+          status.textContent = stage;
+          retry.style.display = 'none';
+          window.clearTimeout(slowTimer);
+          slowTimer = window.setTimeout(function () {
+            if (finished || failed) return;
+            status.textContent = stage + '，网络较慢，请稍候。也可以重试，本地存档会保留。';
+            retry.style.display = 'block';
+          }, 20000);
+        },
+        fail: function (message) {
+          if (finished) return;
+          failed = true;
+          window.clearTimeout(slowTimer);
+          status.textContent = message + '。请检查网络后重试，本地存档会保留。';
+          document.getElementById('boot-status-mark').style.animation = 'none';
+          retry.style.display = 'block';
         }
-        flutterViewObserver.disconnect();
-        window.setTimeout(function () {
-          var bootStatus = document.getElementById('boot-status');
-          if (bootStatus) {
-            bootStatus.style.display = 'none';
-            bootStatus.setAttribute('aria-hidden', 'true');
-          }
-        }, 500);
-      });
-      flutterViewObserver.observe(document.body, { childList: true });
-
+      };
+      window.addEventListener('flutter-first-frame', function () {
+        finished = true;
+        window.clearTimeout(slowTimer);
+        var overlay = document.getElementById('boot-status');
+        overlay.style.display = 'none';
+        overlay.setAttribute('aria-hidden', 'true');
+      }, { once: true });
+      window.theaterBoot.stage(stage);
       var stablePrefix = 'wwjc.flutter.';
       var backupKey = 'wwjc.shared_preferences.backup.v1';
       var dbName = 'wwjc-durable-storage';
       var storeName = 'snapshots';
       var bootStarted = false;
       var bootFallbackTimer = window.setTimeout(boot, 4000);
-
-      window.setTimeout(function () {
-        var status = document.getElementById('boot-status-message');
-        var retry = document.getElementById('boot-retry');
-        if (!status || !retry) {
-          return;
-        }
-        status.textContent = '启动时间较长，可以重新加载；本地存档不会被清除。';
-        retry.style.display = 'block';
-      }, 15000);
 
       function openDb() {
         return new Promise(function (resolve) {
@@ -210,7 +215,9 @@
         bootStarted = true;
         window.clearTimeout(bootFallbackTimer);
         var script = document.createElement('script');
+        window.theaterBoot.stage('正在下载启动程序');
         script.src = 'flutter_bootstrap.js';
+        script.onerror = function () { window.theaterBoot.fail('启动程序下载失败'); };
         script.async = true;
         document.body.appendChild(script);
       }

@@ -7,6 +7,7 @@ import 'screens/home_shell.dart';
 import 'theme/app_theme.dart';
 import 'utils/app_text_scaler.dart';
 import 'widgets/opening_curtain_gate.dart';
+import 'widgets/theme_font_loader.dart';
 
 class AiRoleplayApp extends StatelessWidget {
   const AiRoleplayApp({super.key});
@@ -60,21 +61,24 @@ class AiRoleplayApp extends StatelessWidget {
             appChild,
           ],
         );
-        return MediaQuery(
-          data: mediaQuery.copyWith(
-            textScaler: AppTextScaler(
-              systemScaler: mediaQuery.textScaler,
-              uiScale: uiScale,
+        return ThemeFontLoader(
+          themeId: themeId,
+          child: MediaQuery(
+            data: mediaQuery.copyWith(
+              textScaler: AppTextScaler(
+                systemScaler: mediaQuery.textScaler,
+                uiScale: uiScale,
+              ),
             ),
+            child: hasInitializationError
+                ? layeredChild
+                : OpeningCurtainGate(
+                    ready: !isInitializing,
+                    loadingLabel: initializationPhase,
+                    onOpened: controller.openCurtainAndStartMusic,
+                    child: layeredChild,
+                  ),
           ),
-          child: hasInitializationError
-              ? layeredChild
-              : OpeningCurtainGate(
-                  ready: !isInitializing,
-                  loadingLabel: initializationPhase,
-                  onOpened: controller.openCurtainAndStartMusic,
-                  child: layeredChild,
-                ),
         );
       },
       home: const HomeShell(),

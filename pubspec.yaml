@@ -36,6 +36,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/fonts/
     - assets/licenses/
     - assets/bubble_skins/
     - assets/theme_skins/april_fools/backgrounds/
@@ -63,24 +64,6 @@ flutter:
     - assets/theme_skins/vinyl_memories/avatars/
     - assets/theme_skins/vinyl_memories/buttons/
   fonts:
-    - family: FlowerWenDingKai
+    - family: Roboto
       fonts:
-        - asset: assets/fonts/gkai00mp-2.ttf
-    - family: AbyssSerif
-      fonts:
-        - asset: assets/fonts/SourceHanSerifCN-Regular.otf
-    - family: AbyssLogo
-      fonts:
-        - asset: assets/fonts/ZhanKuXiaoLOGOTi.otf
-    - family: RiftSans
-      fonts:
-        - asset: assets/fonts/SourceHanSansSC-Regular.otf
-    - family: RiftCombat
-      fonts:
-        - asset: assets/fonts/ZiTiChuanQiTeZhanTi.ttf
-    - family: PastureXiaolai
-      fonts:
-        - asset: assets/fonts/Xiaolai-Regular.ttf
-    - family: VinylWenkai
-      fonts:
-        - asset: assets/fonts/LXGWWenKai-Regular.ttf
+        - asset: assets/fonts/TheaterBootstrapSans.otf

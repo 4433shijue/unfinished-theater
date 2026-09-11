@@ -42,6 +42,9 @@ jobs:
       - name: Analyze
         run: flutter analyze
 
+      - name: Test browser startup states
+        run: node --test tools/web_boot_test.mjs
+
       - name: Test
         run: flutter test --no-pub
 
