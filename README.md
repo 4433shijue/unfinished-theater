@@ -10,8 +10,8 @@
 
 | 你想怎么入场 | 从这里走 |
 | --- | --- |
-| 打开网页就玩 | 网页地址待首次部署后补充 |
-| 安卓安装 | 在本仓库 Releases 下载 `.apk`，首个正式包准备中 |
+| 打开网页就玩 | [直接进入剧场](https://4433shijue.github.io/unfinished-theater/) |
+| 安卓安装 | [前往 Releases 下载 `.apk`](https://github.com/4433shijue/unfinished-theater/releases/latest) |
 | 下载源码自己运行 | 看下方的本地启动 |
 | 自己修改、打包或部署 | 看下方构建说明和 [发布指南](docs/PUBLISHING.md) |
 
@@ -34,7 +34,7 @@
 
 需要先安装 [Git](https://git-scm.com/downloads) 和 [Flutter SDK](https://docs.flutter.dev/install)，并把 Flutter 加入 PATH。项目自动构建固定使用 Flutter **3.41.7**，建议先用同一版本。Git 负责搬代码，Flutter 负责让代码上班。
 
-仓库地址确定为下面这个，首次上传完成后即可克隆。
+复制下面几行，就能把剧场搬回自己电脑。
 
 ```bash
 git clone https://github.com/4433shijue/unfinished-theater.git
@@ -49,8 +49,7 @@ flutter run -d web-server --web-hostname 127.0.0.1 --web-port 5173
 Windows 也可以直接运行启动脚本。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .
-un_web.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\run_web.ps1
 ```
 
 macOS 和 Linux 使用下面这条。

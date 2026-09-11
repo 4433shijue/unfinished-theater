@@ -69,6 +69,8 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           mkdir -p build/downloads
+          cp LICENSE.md THIRD_PARTY_NOTICES.md build/downloads/
+          cp LICENSE.md THIRD_PARTY_NOTICES.md build/web/
           cp build/app/outputs/flutter-apk/app-release.apk "build/downloads/unfinished-theater-$TAG-android.apk"
           (cd build/web && zip -qr "../downloads/unfinished-theater-$TAG-web.zip" .)
           (cd build/downloads && sha256sum *.apk *.zip > SHA256SUMS.txt)
