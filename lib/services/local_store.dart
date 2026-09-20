@@ -444,6 +444,22 @@ class LocalStore {
     await _setStringChecked(prefs, _charactersKey, jsonEncode(payload));
   }
 
+  Future<void> commitGameplaySystem({
+    required List<CharacterProfile> characters,
+    required GameStateSnapshot gameState,
+    required DialogueHistory history,
+  }) async {
+    await _commitStorageBatch(
+      journalName: 'gameplay_${gameState.characterId}',
+      writes: <String, String?>{
+        _charactersKey:
+            jsonEncode(characters.map((item) => item.toJson()).toList()),
+        _gameStateKey(gameState.characterId): jsonEncode(gameState.toJson()),
+        _historyKey(history.characterId): jsonEncode(history.toJson()),
+      },
+    );
+  }
+
   Future<List<UserProfile>> loadUserProfiles() async {
     final prefs = await SharedPreferences.getInstance();
     return _loadJsonValue<List<UserProfile>>(

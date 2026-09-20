@@ -4,6 +4,7 @@ import '../models/character_profile.dart';
 import '../models/game_state.dart';
 import '../models/npc_profile.dart';
 import 'gameplay_patch_engine.dart';
+import 'gameplay_prompt_context.dart';
 import 'reply_protocol_validator.dart';
 
 class TurnStateAdjudication {
@@ -56,6 +57,8 @@ class TurnStateAdjudicator {
 5. 新 NPC 可以动态加入 NPC更新，不需要改动玩法变量表。
 6. 玩法变量不得复制任何 NPC 的好感、亲密度或信任度。
 ${gameplayPatchRequired ? '7. gameplayPatch 必须存在，只修改已声明的玩法变量；确实无变化时 ops 为空。' : '7. 本剧场未启用玩法变量，gameplayPatch 固定输出 {"ops":[]} 且不会被应用。'}
+${gameplayPatchRequired ? GameplayPromptContext.threadInstructions : ''}
+8. 只更新 authority=ai 的变量，程序规则的费用、效果和 rule 时钟由 App 结算，不得重复扣除或推进。闲聊、查看状态、补充台词不推动剧情时间。
 ''';
   }
 
@@ -94,19 +97,8 @@ ${gameplayPatchRequired ? '7. gameplayPatch 必须存在，只修改已声明的
     final gameplay = character.gameplaySystem;
     final variables = gameplay == null
         ? const <Map<String, dynamic>>[]
-        : gameplay.variables
-            .map(
-              (variable) => <String, dynamic>{
-                'path': variable.key,
-                'label': variable.label,
-                'authority': variable.authority.name,
-                'currentValue': previousState.customVariables[variable.key],
-                'min': variable.min,
-                'max': variable.max,
-                'maxDelta': variable.maxDelta,
-              },
-            )
-            .toList(growable: false);
+        : GameplayPromptContext.variables(
+            system: gameplay, state: previousState);
 
     return '''
 【剧场】${character.name}
@@ -121,6 +113,9 @@ ${jsonEncode(npcs)}
 
 【已声明玩法变量】
 ${jsonEncode(variables)}
+
+【已保存的承诺与余波】
+${gameplay == null ? '' : GameplayPromptContext.consequences(previousState)}
 
 【本轮剧情正文与展示内容】
 $narrativeReply

@@ -12,6 +12,7 @@ import '../services/file_download_service.dart';
 import '../services/message_content_parser.dart';
 import '../theme/app_theme.dart';
 import 'character_avatar.dart';
+import 'gameplay_turn_feedback.dart';
 import 'runnable_code_preview.dart';
 
 class ChatMessageBubble extends StatefulWidget {
@@ -382,6 +383,10 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
                   ),
                   const SizedBox(height: 10),
                   ..._buildAssistantSegments(context, parsed),
+                  GameplayTurnFeedback(
+                    message: widget.message,
+                    isStreaming: widget.isStreaming,
+                  ),
                   if (widget.message.bookmarkNote.trim().isNotEmpty) ...[
                     const SizedBox(height: 12),
                     _BookmarkNotePill(

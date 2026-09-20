@@ -1,12 +1,14 @@
 import 'dart:convert';
 
 import '../models/gameplay_system.dart';
+import '../models/gameplay_runtime.dart';
 
 enum GameplayPatchOperationType {
   set,
   increment,
   append,
   remove,
+  invalid,
 }
 
 class GameplayPatchOperation {
@@ -24,7 +26,8 @@ class GameplayPatchOperation {
         'inc' || 'increment' => GameplayPatchOperationType.increment,
         'append' || 'add' => GameplayPatchOperationType.append,
         'remove' || 'delete' => GameplayPatchOperationType.remove,
-        _ => GameplayPatchOperationType.set,
+        'set' => GameplayPatchOperationType.set,
+        _ => GameplayPatchOperationType.invalid,
       },
       path: (json['path'] ?? json['key'])?.toString().trim() ?? '',
       value: json['value'],
@@ -71,11 +74,13 @@ class GameplayPatchParseResult {
     required this.found,
     required this.operations,
     this.error,
+    this.threads = const <GameplayThreadOperation>[],
   });
 
   final bool found;
   final List<GameplayPatchOperation> operations;
   final String? error;
+  final List<GameplayThreadOperation> threads;
 
   bool get isValid => found && error == null;
 }
@@ -126,8 +131,14 @@ class GameplayPatchParser {
       final dynamic rawOperations;
       if (decoded is List) {
         rawOperations = decoded;
-      } else if (decoded is Map && decoded['ops'] is List) {
-        rawOperations = decoded['ops'];
+      } else if (decoded is Map &&
+          (decoded['ops'] is List || decoded['threads'] is List)) {
+        if ((decoded.containsKey('ops') && decoded['ops'] is! List) ||
+            (decoded.containsKey('threads') && decoded['threads'] is! List)) {
+          return const GameplayPatchParseResult(
+              found: true, operations: [], error: 'ops 和 threads 必须为数组');
+        }
+        rawOperations = decoded['ops'] ?? const [];
       } else {
         return const GameplayPatchParseResult(
           found: true,
@@ -135,8 +146,38 @@ class GameplayPatchParser {
           error: '变量补丁必须是操作数组或包含 ops 数组的对象',
         );
       }
-      final operations = (rawOperations as List)
-          .whereType<Map>()
+      final rawThreads = decoded is Map && decoded['threads'] is List
+          ? decoded['threads'] as List
+          : const [];
+      if ((rawOperations as List).any((item) => item is! Map) ||
+          rawThreads.any((item) => item is! Map)) {
+        return const GameplayPatchParseResult(
+          found: true,
+          operations: [],
+          error: '变量和承诺补丁的每一项必须为对象',
+        );
+      }
+      if (rawOperations.length > 48 || rawThreads.length > 8) {
+        return const GameplayPatchParseResult(
+          found: true,
+          operations: [],
+          error: '每轮最多支持 48 项变量操作和 8 项承诺操作',
+        );
+      }
+      if (rawOperations.cast<Map>().any((item) =>
+          item['op'] is! String ||
+          (item['op'] as String).trim().isEmpty ||
+          (item['path'] ?? item['key']) is! String ||
+          (item['path'] ?? item['key']).toString().trim().isEmpty ||
+          !item.containsKey('value'))) {
+        return const GameplayPatchParseResult(
+          found: true,
+          operations: [],
+          error: '每项变量操作需要 op、path 和 value',
+        );
+      }
+      final operations = rawOperations
+          .cast<Map>()
           .map((item) => GameplayPatchOperation.fromJson(
                 Map<String, dynamic>.from(item),
               ))
@@ -146,6 +187,11 @@ class GameplayPatchParser {
       return GameplayPatchParseResult(
         found: true,
         operations: operations,
+        threads: rawThreads
+            .cast<Map>()
+            .map((item) => GameplayThreadOperation.fromJson(
+                Map<String, dynamic>.from(item)))
+            .toList(),
       );
     } catch (_) {
       return const GameplayPatchParseResult(
@@ -198,6 +244,7 @@ class GameplayPatchEngine {
     required List<GameplayPatchOperation> operations,
   }) {
     final values = initializeValues(system, currentValues);
+    final turnStartValues = Map<String, dynamic>.from(values);
     final changes = <GameplayPatchChange>[];
     final rejections = <String>[];
 
@@ -216,6 +263,12 @@ class GameplayPatchEngine {
       dynamic candidate;
       switch (operation.type) {
         case GameplayPatchOperationType.set:
+          if ((variable.type == GameplayVariableType.number ||
+                  variable.type == GameplayVariableType.clock) &&
+              _finiteNumber(operation.value) == null) {
+            rejections.add('${operation.path}：赋值不是有效有限数字');
+            continue;
+          }
           candidate = variable.normalizeValue(operation.value);
         case GameplayPatchOperationType.increment:
           if (variable.type != GameplayVariableType.number &&
@@ -223,19 +276,17 @@ class GameplayPatchEngine {
             rejections.add('${operation.path}：非数值变量不能增减');
             continue;
           }
-          final delta = operation.value is num
-              ? (operation.value as num).toDouble()
-              : double.tryParse(operation.value?.toString() ?? '');
+          final delta = _finiteNumber(operation.value);
           if (delta == null) {
             rejections.add('${operation.path}：增量不是有效数字');
             continue;
           }
-          final limit = variable.maxDelta;
-          final safeDelta = limit == null
-              ? delta
-              : delta.clamp(-limit.abs(), limit.abs()).toDouble();
           final current = before is num ? before.toDouble() : 0;
-          candidate = variable.normalizeValue(current + safeDelta);
+          if (!(current + delta).isFinite) {
+            rejections.add('${operation.path}：增减结果超出有效数字范围');
+            continue;
+          }
+          candidate = variable.normalizeValue(current + delta);
         case GameplayPatchOperationType.append:
           if (variable.type != GameplayVariableType.list) {
             rejections.add('${operation.path}：只有列表变量可以追加');
@@ -262,6 +313,17 @@ class GameplayPatchEngine {
                     .toList()
                 : const <String>[],
           );
+        case GameplayPatchOperationType.invalid:
+          rejections.add('${operation.path}：未知变量操作');
+          continue;
+      }
+
+      final limit = variable.maxDelta;
+      if (candidate is num && limit != null && limit.isFinite) {
+        final start = _finiteNumber(turnStartValues[variable.key]) ?? 0;
+        candidate = variable.normalizeValue(candidate
+            .toDouble()
+            .clamp(start - limit.abs(), start + limit.abs()));
       }
 
       if (_jsonEquals(before, candidate)) {
@@ -287,6 +349,13 @@ class GameplayPatchEngine {
 
   static bool _jsonEquals(dynamic left, dynamic right) =>
       jsonEncode(left) == jsonEncode(right);
+
+  static double? _finiteNumber(dynamic value) {
+    final number = value is num
+        ? value.toDouble()
+        : double.tryParse(value?.toString() ?? '');
+    return number != null && number.isFinite ? number : null;
+  }
 
   static String? _claimedLegacyMetric(GameplayVariableDefinition variable) {
     final text = '${variable.key}${variable.label}'

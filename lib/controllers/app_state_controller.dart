@@ -35,6 +35,10 @@ import '../services/data_health_service.dart';
 import '../services/llm_api_client.dart';
 import '../services/game_state_parser.dart';
 import '../services/gameplay_patch_engine.dart';
+import '../services/gameplay_turn_engine.dart';
+import '../services/gameplay_prompt_context.dart';
+import '../services/gameplay_system_draft.dart';
+import '../services/gameplay_system_parser.dart';
 import '../services/local_audio_picker.dart';
 import '../services/local_audio_storage.dart';
 import '../services/local_store.dart';
@@ -1008,6 +1012,9 @@ class AppStateController extends ChangeNotifier {
       _memoryFor(characterId);
 
   GameStateSnapshot get currentGameState => _gameStateFor(_selectedCharacterId);
+
+  GameStateSnapshot gameplayStateFor(String characterId) =>
+      _gameStateFor(characterId);
 
   Map<String, dynamic> gameplayValuesFor(String characterId) =>
       Map<String, dynamic>.unmodifiable(
@@ -4753,7 +4760,11 @@ $instruction
       branchSourceCharacterId: rootCharacter.id,
       branchOriginMessageId: messageId,
       branchName: trimmedName,
-      gameplaySystem: sourceCharacter.gameplaySystem,
+      gameplaySystem: _gameplaySystemAtMessage(
+        _messageWithNearestStateSnapshot(sourceHistory.messages, originIndex) ??
+            sourceHistory.messages[originIndex],
+        sourceCharacter.gameplaySystem,
+      ),
       modelParams: sourceCharacter.modelParams,
     );
 
@@ -6891,7 +6902,7 @@ ${target.content}
     return result;
   }
 
-  Future<GameplaySystem> generateGameplaySystem(String characterId) async {
+  Future<GameplaySystem> previewGameplaySystem(String characterId) async {
     if (!_settings.canChat) {
       throw const LlmApiException('请先在设置页填写 API 地址、密钥和模型名称。');
     }
@@ -6902,45 +6913,103 @@ ${target.content}
     if (character == null) {
       throw const LlmApiException('没有找到要生成玩法系统的剧场。');
     }
-
     _isGameplaySystemGenerating = true;
     notifyListeners();
     try {
-      final system = await _apiClient.generateGameplaySystem(
+      return await _apiClient.generateGameplaySystem(
         settings: _settings,
         character: character,
       );
-      final index = _characters.indexWhere((item) => item.id == characterId);
-      if (index == -1) {
-        throw const LlmApiException('剧场已经不存在，无法保存玩法系统。');
-      }
-
-      final state = await _ensureGameState(characterId);
-      final values = GameplayPatchEngine.initializeValues(
-        system,
-        state.customVariables,
-      );
-      final nextState = state.copyWith(
-        updatedAt: DateTime.now(),
-        metrics: GameplayPatchEngine.removeClaimedLegacyMetrics(
-          system,
-          state.metrics,
-        ),
-        customVariables: values,
-        customVariablesRevision: state.customVariablesRevision + 1,
-        gameplayVariableChanges: const <String>[],
-        gameplayPlayerVariableChanges: const <String>[],
-        gameplayVariableWarnings: const <String>[],
-      );
-      _characters[index] = character.copyWith(gameplaySystem: system);
-      _gameStateCache[characterId] = nextState;
-      await _store.saveCharacters(_characters);
-      await _store.saveGameState(nextState);
-      return system;
     } finally {
       _isGameplaySystemGenerating = false;
       notifyListeners();
     }
+  }
+
+  Future<void> applyGameplaySystem(
+    String characterId,
+    GameplaySystem system,
+  ) async {
+    if (_isSending || _isMapGenerating || _isGameplaySystemGenerating) {
+      throw const LlmApiException('当前还有内容正在生成，请稍等。');
+    }
+    GameplaySystemParser.validateSystem(system);
+    final character = _findCharacter(characterId);
+    if (character == null) {
+      throw const LlmApiException('剧场已经不存在，无法保存玩法系统。');
+    }
+    _isGameplaySystemGenerating = true;
+    notifyListeners();
+    try {
+      final state = await _ensureGameState(characterId);
+      final history = await _ensureHistory(characterId);
+      final previousSystem = character.gameplaySystem;
+      if (previousSystem != null) {
+        await _createSafetySnapshotForCharacter(
+          characterId,
+          reason: '调整玩法规则前自动保护',
+        );
+      }
+      final values = previousSystem == null
+          ? GameplayPatchEngine.initializeValues(system, state.customVariables)
+          : GameplaySystemDraft.preview(
+                  current: previousSystem, generated: system)
+              .migrateValues(state.customVariables);
+      final nextState = state.copyWith(
+        updatedAt: DateTime.now(),
+        metrics: GameplayPatchEngine.removeClaimedLegacyMetrics(
+            system, state.metrics),
+        customVariables: values,
+        customVariablesRevision: state.customVariablesRevision + 1,
+        gameplayRuntime: previousSystem == null
+            ? state.gameplayRuntime
+            : GameplaySystemDraft.preview(
+                    current: previousSystem, generated: system)
+                .migrateRuntime(state.gameplayRuntime),
+        gameplayVariableChanges: const <String>[],
+        gameplayPlayerVariableChanges: const <String>[],
+        gameplayVariableWarnings: const <String>[],
+      );
+      final nextCharacters = _characters
+          .map((item) => item.id == characterId
+              ? item.copyWith(gameplaySystem: system)
+              : item)
+          .toList(growable: false);
+      final nextHistory = history.copyWith(
+        clearPromptCacheEpoch: true,
+        messages: history.messages.map((message) {
+          if (previousSystem == null ||
+              message.role != ChatRole.assistant ||
+              message.gameStateSnapshot == null ||
+              message.gameStateSnapshot!.containsKey('gameplaySystem')) {
+            return message;
+          }
+          return message.copyWith(gameStateSnapshot: <String, dynamic>{
+            ...message.gameStateSnapshot!,
+            'gameplaySystem': previousSystem.toJson(),
+          });
+        }).toList(growable: false),
+      );
+      await _store.commitGameplaySystem(
+        characters: nextCharacters,
+        gameState: nextState,
+        history: nextHistory,
+      );
+      _characters
+        ..clear()
+        ..addAll(nextCharacters);
+      _gameStateCache[characterId] = nextState;
+      _historyCache[characterId] = nextHistory;
+    } finally {
+      _isGameplaySystemGenerating = false;
+      notifyListeners();
+    }
+  }
+
+  Future<GameplaySystem> generateGameplaySystem(String characterId) async {
+    final system = await previewGameplaySystem(characterId);
+    await applyGameplaySystem(characterId, system);
+    return system;
   }
 
   Future<String?> queueUserMessage(String content) async {
@@ -7951,11 +8020,14 @@ ${choices.trim().isEmpty ? '暂无。' : choices}
           '模型没有返回可解析的 GAME_STATE，规则回合未提交。',
         );
       }
+      final gameplayTurnId = IdGenerator.message();
       var narrativeGameState = previousGameState;
       if (character.gameplaySystem != null) {
         narrativeGameState = _applyGameplayPatchToState(
           character: character,
-          state: previousGameState,
+          previousState: previousGameState,
+          state: _mergeGameStateWithRulesMap(previousGameState, nextMapState),
+          turnId: gameplayTurnId,
           content: repairedResult,
           patchExpected: true,
         );
@@ -7988,8 +8060,11 @@ ${choices.trim().isEmpty ? '暂无。' : choices}
       );
       final assistantContent = '【地图主线｜$actionTitle】\n$visibleContent';
       final assistantMessage = ChatMessage(
-        id: IdGenerator.message(),
+        id: gameplayTurnId,
         role: ChatRole.assistant,
+        gameStateSnapshot: _gameplaySnapshot(
+            nextGameState, character.gameplaySystem,
+            previousState: previousGameState),
         content: assistantContent,
         timestamp: messageTime.add(const Duration(microseconds: 1)),
         isSummarized: false,
@@ -8855,6 +8930,18 @@ title, stage, mainGoal, locations, edges, spawnCandidates, mapInventory, quests,
       return '这条回复前面没有可用于重新生成的用户消息。';
     }
 
+    final turnSystem =
+        _gameplaySystemAtMessage(targetMessage, character.gameplaySystem);
+    final turnCharacter = turnSystem == null
+        ? character
+        : character.copyWith(gameplaySystem: turnSystem);
+    final beforeTarget = _replayGameStateFromHistory(
+      character.id,
+      history.copyWith(messages: requestSeedMessages),
+      baselineOverride: _gameplayReplayBaseline(history.messages, character.id),
+      finalSystemOverride: turnSystem,
+    ).gameState;
+
     final replacedMessages = List<ChatMessage>.from(history.messages);
     replacedMessages[messageIndex] = targetMessage.copyWith(
       content: '',
@@ -8878,12 +8965,13 @@ title, stage, mainGoal, locations, edges, spawnCandidates, mapInventory, quests,
           ];
 
     return _streamAssistantReply(
-      character: character,
+      character: turnCharacter,
       originalHistory: history,
       optimisticHistory: history.copyWith(messages: replacedMessages),
       placeholderMessageId: targetMessage.id,
       requestMessages: requestMessages,
       invalidatedMessageIds: <String>{targetMessage.id},
+      gameStateOverride: beforeTarget,
       // 不强制重置缓存阶段：重生成请求的前缀与上一轮完全相同，
       // 保留 epoch 可以让这条请求直接命中服务端上下文缓存；
       // 目标消息在窗口锚点之前时，_planChatRequestMessages 会
@@ -9146,6 +9234,7 @@ title, stage, mainGoal, locations, edges, spawnCandidates, mapInventory, quests,
     _startStreamingSession(workingMessage.id);
     notifyListeners();
 
+    var committed = false;
     try {
       final result = await _apiClient.runUtilityTask(
         settings: _settings,
@@ -9166,22 +9255,67 @@ ${target.content}
         topP: 0.9,
       );
 
-      final normalizedResult =
+      final formatted =
           MessageContentParser.normalizeChoiceBlocks(result).trim();
-      final finalHistory = _replaceMessageContent(
+      final normalizedResult = replaceOriginal
+          ? ReplyProtocolReconciler.mergeStateBlocks(
+              primary: formatted,
+              fallback: target.content,
+              gameplayPatchRequired:
+                  _gameplaySystemAtMessage(target, character.gameplaySystem) !=
+                          null ||
+                      GameplayPatchParser.parseResult(target.content).found,
+            )
+          : GameStateParser.stripStateBlocks(formatted).trim();
+      if (normalizedResult.isEmpty) {
+        throw const LlmApiException('没有生成可显示的格式修复结果。');
+      }
+      var finalHistory = _replaceMessageContent(
         _historyCache[character.id]!,
         workingMessage.id,
         normalizedResult,
+        gameStateSnapshot: replaceOriginal ? target.gameStateSnapshot : null,
         tokenCount: _countCompletedTextTokens(normalizedResult),
+        promptReplayContent:
+            _apiClient.buildAssistantPromptReplayContent(normalizedResult),
+        providerReplayContent: normalizedResult,
+        providerReplayExact: false,
       );
+      _TimelineReplayResult? repairedTimeline;
+      CharacterMemory? repairedMemory;
+      if (replaceOriginal) {
+        final invalidated = await _invalidateSummariesForMessageIds(
+          characterId: character.id,
+          history: finalHistory,
+          changedMessageIds: {target.id},
+        );
+        repairedMemory = invalidated.memory;
+        repairedTimeline =
+            _replayGameStateFromHistory(character.id, invalidated.history);
+        finalHistory = repairedTimeline.history;
+      }
+      await _store.commitTurnState(
+        history: finalHistory,
+        gameState: repairedTimeline?.gameState,
+        memory: repairedMemory,
+      );
+      committed = true;
       _historyCache[character.id] = finalHistory;
-      await _store.saveDialogueHistory(finalHistory);
-      await _updateGameStateFromMessage(character.id, result);
+      if (repairedMemory != null) _memoryCache[character.id] = repairedMemory;
+      if (repairedTimeline != null) {
+        _gameStateCache[character.id] = repairedTimeline.gameState;
+        await _rebuildTimelineAutoNpcs(
+          characterId: character.id,
+          states: repairedTimeline.states,
+        );
+      }
       return null;
     } on LlmApiException catch (error) {
+      if (committed) return '$title 已保存，但后续资料更新失败：${error.message}';
       _historyCache[character.id] = history;
       return error.message;
     } catch (error) {
+      if (committed) return '$title 已保存，但后续资料更新失败：$error';
       _historyCache[character.id] = history;
       return '$title 失败：$error';
     } finally {
@@ -10975,6 +11109,7 @@ messages 必须是 1-3 条，每条都要像真实手机聊天气泡：自然、
         character.id,
         repairedResult,
         gameplayPatchExpected: character.gameplaySystem != null,
+        turnId: _historyFor(character.id).messages.last.id,
       );
       await _applyMapMovementNpcMessages(character.id, nextState);
       _scheduleSummarization(character.id);
@@ -11060,7 +11195,7 @@ messages 必须是 1-3 条，每条都要像真实手机聊天气泡：自然、
         ? ''
         : _formatGameplaySystemForPrompt(
             character.gameplaySystem!,
-            gameState.customVariables,
+            gameState,
           );
 
     return '''
@@ -12153,6 +12288,7 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
     required Set<String> invalidatedMessageIds,
     String cacheResetReason = '',
     TurnDirective? requestTurnDirective,
+    GameStateSnapshot? gameStateOverride,
   }) async {
     if (_isDataMutationInProgress) {
       return '数据正在导入或删除，请稍等。';
@@ -12173,6 +12309,7 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
         messages: requestMessages,
         forcedRolloverReason: cacheResetReason,
         requestTurnDirective: requestTurnDirective,
+        gameStateOverride: gameStateOverride,
       );
       finalEpoch = prepared.epoch;
       final cacheOriginalHistory = originalHistory.copyWith(
@@ -12309,7 +12446,9 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
       if (!_cancelCurrentReply && character.gameplaySystem != null) {
         parsedGameState = _applyGameplayPatchToState(
           character: character,
+          previousState: prepared.gameState,
           state: parsedGameState ?? prepared.gameState,
+          turnId: placeholderMessageId,
           content: finalContent,
           patchExpected: true,
         );
@@ -12319,7 +12458,9 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
           finalHistory,
           placeholderMessageId,
           finalContent,
-          gameStateSnapshot: parsedGameState.toJson(),
+          gameStateSnapshot: _gameplaySnapshot(
+              parsedGameState, character.gameplaySystem,
+              previousState: prepared.gameState),
           tokenCount: finalTokenCount,
           clearTokenCount: finalTokenCount == null,
           promptReplayContent: _apiClient.buildAssistantPromptReplayContent(
@@ -12352,6 +12493,14 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
         invalidatedMemory = invalidated.memory;
       }
 
+      _TimelineReplayResult? repairedTimeline;
+      if (invalidatedIds.isNotEmpty && !_cancelCurrentReply) {
+        repairedTimeline =
+            _replayGameStateFromHistory(character.id, finalHistory);
+        finalHistory = repairedTimeline.history;
+        parsedGameState = repairedTimeline.gameState;
+      }
+
       _historyCache[character.id] = finalHistory;
       if (parsedGameState != null) {
         _gameStateCache[character.id] = parsedGameState;
@@ -12362,7 +12511,12 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
         memory: invalidatedMemory,
       );
       turnCommitted = true;
-      if (!_cancelCurrentReply && parsedGameState != null) {
+      if (repairedTimeline != null) {
+        await _rebuildTimelineAutoNpcs(
+          characterId: character.id,
+          states: repairedTimeline.states,
+        );
+      } else if (!_cancelCurrentReply && parsedGameState != null) {
         final deliveredNpcMessages = await _applyGameStateNpcUpdates(
           character.id,
           parsedGameState,
@@ -12375,14 +12529,6 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
             sourceTurnId: placeholderMessageId,
           );
         }
-      }
-      if (invalidatedIds.isNotEmpty && !_cancelCurrentReply) {
-        final reconciled = await _rebuildTimelineStateFromHistory(
-          characterId: character.id,
-          history: _historyCache[character.id] ?? finalHistory,
-        );
-        _historyCache[character.id] = reconciled.history;
-        await _store.saveDialogueHistory(reconciled.history);
       }
       if (!_cancelCurrentReply) {
         _scheduleSummarization(character.id);
@@ -13131,19 +13277,19 @@ F|做一个意外但仍合理的行动，打破当前僵局。
     }
 
     final character = _findCharacter(sourceCharacterId);
-    var state = GameStateSnapshot.empty(sourceCharacterId);
-    if (character?.gameplaySystem != null) {
-      state = state.copyWith(
-        customVariables: GameplayPatchEngine.initializeValues(
-          character!.gameplaySystem!,
-          const <String, dynamic>{},
-        ),
-      );
-    }
+    final baseline = _gameplayReplayBaseline(messages, sourceCharacterId);
+    var state = baseline.state;
+    GameplaySystem? replaySystem = baseline.system;
     var parsedAny = false;
     for (final message in messages) {
       if (message.role != ChatRole.assistant) {
         continue;
+      }
+      final turnSystem =
+          _gameplaySystemAtMessage(message, character?.gameplaySystem);
+      if (turnSystem != null) {
+        state = _gameplayStateForDefinition(state, replaySystem, turnSystem);
+        replaySystem = turnSystem;
       }
       var parsed = GameStateParser.parseFromMessage(
         characterId: sourceCharacterId,
@@ -13154,7 +13300,11 @@ F|做一个意外但仍合理的行动，打破当前僵局。
       if (character?.gameplaySystem != null && patch.found) {
         parsed = _applyGameplayPatchToState(
           character: character!,
+          previousState: state,
           state: parsed ?? state,
+          turnId: message.id,
+          systemOverride:
+              _gameplaySystemAtMessage(message, character.gameplaySystem!),
           content: message.content,
           patchExpected: false,
         );
@@ -13601,6 +13751,7 @@ F|做一个意外但仍合理的行动，打破当前僵局。
     String characterId,
     String content, {
     bool gameplayPatchExpected = false,
+    String? turnId,
   }) async {
     final previous = await _ensureGameState(characterId);
     var parsed = GameStateParser.parseFromMessage(
@@ -13614,7 +13765,9 @@ F|做一个意外但仍合理的行动，打破当前僵局。
         (patch.found || gameplayPatchExpected)) {
       parsed = _applyGameplayPatchToState(
         character: character!,
+        previousState: previous,
         state: parsed ?? previous,
+        turnId: turnId,
         content: content,
         patchExpected: gameplayPatchExpected,
       );
@@ -13625,6 +13778,20 @@ F|做一个意外但仍合理的行动，打破当前僵局。
 
     _gameStateCache[characterId] = parsed;
     await _store.saveGameState(parsed);
+    if (turnId != null) {
+      final history = await _ensureHistory(characterId);
+      final updated = history.copyWith(
+          messages: history.messages
+              .map((message) => message.id == turnId
+                  ? message.copyWith(
+                      gameStateSnapshot: _gameplaySnapshot(
+                          parsed!, character?.gameplaySystem,
+                          previousState: previous))
+                  : message)
+              .toList(growable: false));
+      _historyCache[characterId] = updated;
+      await _store.saveDialogueHistory(updated);
+    }
     await _applyGameStateNpcUpdates(characterId, parsed);
   }
 
@@ -13647,18 +13814,16 @@ F|做一个意外但仍合理的行动，打破当前僵局。
 
   _TimelineReplayResult _replayGameStateFromHistory(
     String characterId,
-    DialogueHistory history,
-  ) {
+    DialogueHistory history, {
+    ({GameStateSnapshot state, GameplaySystem? system})? baselineOverride,
+    GameplaySystem? finalSystemOverride,
+  }) {
     final character = _findCharacter(characterId);
-    var state = GameStateSnapshot.empty(characterId);
-    if (character?.gameplaySystem != null) {
-      state = state.copyWith(
-        customVariables: GameplayPatchEngine.initializeValues(
-          character!.gameplaySystem!,
-          const <String, dynamic>{},
-        ),
-      );
-    }
+    final fallbackSystem = finalSystemOverride ?? character?.gameplaySystem;
+    final baseline = baselineOverride ??
+        _gameplayReplayBaseline(history.messages, characterId);
+    var state = baseline.state;
+    GameplaySystem? replaySystem = baseline.system;
     final states = <GameStateSnapshot>[];
     var changed = false;
     final messages = <ChatMessage>[];
@@ -13672,6 +13837,11 @@ F|做一个意外但仍合理的行动，打破当前僵局。
         }
         continue;
       }
+      final turnSystem = _gameplaySystemAtMessage(message, fallbackSystem);
+      if (turnSystem != null) {
+        state = _gameplayStateForDefinition(state, replaySystem, turnSystem);
+        replaySystem = turnSystem;
+      }
       var parsed = GameStateParser.parseFromMessage(
         characterId: characterId,
         content: message.content,
@@ -13681,7 +13851,10 @@ F|做一个意外但仍合理的行动，打破当前僵局。
       if (character?.gameplaySystem != null && patch.found) {
         parsed = _applyGameplayPatchToState(
           character: character!,
+          previousState: state,
           state: parsed ?? state,
+          turnId: message.id,
+          systemOverride: _gameplaySystemAtMessage(message, fallbackSystem),
           content: message.content,
           patchExpected: false,
         );
@@ -13697,11 +13870,20 @@ F|做一个意外但仍合理的行动，打破当前僵局。
       }
       state = _withStableReplayTimestamp(parsed, message);
       states.add(state);
-      final snapshot = state.toJson();
+      final snapshot = _gameplaySnapshot(
+          state,
+          character == null
+              ? null
+              : _gameplaySystemAtMessage(message, fallbackSystem),
+          baseline: message.gameStateSnapshot?['gameplayBaseline']);
       if (jsonEncode(message.gameStateSnapshot) != jsonEncode(snapshot)) {
         changed = true;
       }
       messages.add(message.copyWith(gameStateSnapshot: snapshot));
+    }
+    final currentSystem = fallbackSystem;
+    if (currentSystem != null) {
+      state = _gameplayStateForDefinition(state, replaySystem, currentSystem);
     }
     return _TimelineReplayResult(
       history: changed ? history.copyWith(messages: messages) : history,
@@ -13731,100 +13913,112 @@ F|做一个意外但仍合理的行动，打破当前僵局。
 
   GameStateSnapshot _applyGameplayPatchToState({
     required CharacterProfile character,
+    required GameStateSnapshot previousState,
     required GameStateSnapshot state,
     required String content,
     required bool patchExpected,
+    String? turnId,
+    GameplaySystem? systemOverride,
   }) {
-    final system = character.gameplaySystem;
-    if (system == null) {
+    final system = systemOverride ?? character.gameplaySystem;
+    if (system == null) return state;
+    return GameplayTurnEngine.apply(
+      system: system,
+      previousState: previousState,
+      narrativeState: state,
+      content: content,
+      patchExpected: patchExpected,
+      turnId: turnId,
+    );
+  }
+
+  GameStateSnapshot _gameplayStateForDefinition(
+    GameStateSnapshot state,
+    GameplaySystem? before,
+    GameplaySystem after,
+  ) {
+    if (before != null &&
+        jsonEncode(before.toJson()) == jsonEncode(after.toJson())) {
       return state;
     }
-    final ownedMetrics = GameplayPatchEngine.removeClaimedLegacyMetrics(
-      system,
-      state.metrics,
+    return state.copyWith(
+      customVariables: before == null
+          ? after.initialValues()
+          : GameplaySystemDraft.preview(current: before, generated: after)
+              .migrateValues(state.customVariables),
+      gameplayRuntime: before == null
+          ? state.gameplayRuntime
+          : GameplaySystemDraft.preview(current: before, generated: after)
+              .migrateRuntime(state.gameplayRuntime),
     );
-    final gameplayState = mapEquals(ownedMetrics, state.metrics)
-        ? state
-        : state.copyWith(metrics: ownedMetrics);
-    final parsed = GameplayPatchParser.parseResult(content);
-    final initialized = GameplayPatchEngine.initializeValues(
-      system,
-      gameplayState.customVariables,
-    );
-    if (!parsed.found) {
-      if (!patchExpected) {
-        return gameplayState.copyWith(customVariables: initialized);
-      }
-      return gameplayState.copyWith(
-        customVariables: initialized,
-        gameplayVariableChanges: const <String>[],
-        gameplayPlayerVariableChanges: const <String>[],
-        gameplayVariableWarnings: const <String>[
-          '本轮缺少变量补丁，玩法参数没有更新。',
-        ],
-      );
-    }
-    if (!parsed.isValid) {
-      return gameplayState.copyWith(
-        customVariables: initialized,
-        gameplayVariableChanges: const <String>[],
-        gameplayPlayerVariableChanges: const <String>[],
-        gameplayVariableWarnings: <String>[
-          parsed.error ?? '本轮变量补丁格式错误，玩法参数没有更新。',
-        ],
-      );
-    }
+  }
 
-    final result = GameplayPatchEngine.applyAiPatch(
-      system: system,
-      currentValues: initialized,
-      operations: parsed.operations,
-    );
-    final changes = result.changes.map((change) {
-      final variable = system.variableFor(change.path);
-      final label = variable?.label.trim().isNotEmpty == true
-          ? variable!.label.trim()
-          : change.path;
-      final before = variable?.displayValue(change.before, reveal: true) ??
-          change.before?.toString() ??
-          '暂无';
-      final after = variable?.displayValue(change.after, reveal: true) ??
-          change.after?.toString() ??
-          '暂无';
-      final reason = change.reason.trim();
-      return reason.isEmpty
-          ? '$label：$before → $after'
-          : '$label：$before → $after（$reason）';
-    }).toList(growable: false);
-    final playerChanges = result.changes
-        .where(
-      (change) => system.variableFor(change.path)?.isPlayerFacing ?? false,
-    )
-        .map((change) {
-      final variable = system.variableFor(change.path)!;
-      final before = variable.displayValue(change.before, reveal: false);
-      final after = variable.displayValue(change.after, reveal: false);
-      final reason = change.reason.trim();
-      return reason.isEmpty
-          ? '${variable.label}：$before → $after'
-          : '${variable.label}：$before → $after（$reason）';
-    }).toList(growable: false);
-    final warnings = <String>[
-      ...result.rejections,
-      if (parsed.operations.isNotEmpty &&
-          result.changes.isEmpty &&
-          result.rejections.isEmpty)
-        '本轮变量操作没有产生数值变化。',
-    ];
-    return gameplayState.copyWith(
-      updatedAt: result.changed ? DateTime.now() : gameplayState.updatedAt,
-      customVariables: result.values,
-      customVariablesRevision:
-          gameplayState.customVariablesRevision + (result.changed ? 1 : 0),
-      gameplayVariableChanges: changes,
-      gameplayPlayerVariableChanges: playerChanges,
-      gameplayVariableWarnings: warnings,
-    );
+  Map<String, dynamic> _gameplaySnapshot(
+    GameStateSnapshot state,
+    GameplaySystem? system, {
+    GameStateSnapshot? previousState,
+    dynamic baseline,
+  }) {
+    if (baseline == null && previousState != null && system != null) {
+      final messages = _historyFor(state.characterId).messages;
+      for (final message in messages) {
+        final saved = message.gameStateSnapshot?['gameplayBaseline'];
+        if (saved is Map) {
+          baseline = saved;
+          break;
+        }
+      }
+      if (baseline == null &&
+          !messages.any((message) =>
+              message.role == ChatRole.assistant &&
+              message.gameStateSnapshot != null)) {
+        baseline = {'state': previousState.toJson(), 'system': system.toJson()};
+      }
+    }
+    return {
+      ...state.toJson(),
+      if (system != null) 'gameplaySystem': system.toJson(),
+      if (baseline is Map) 'gameplayBaseline': baseline,
+    };
+  }
+
+  ({GameStateSnapshot state, GameplaySystem? system}) _gameplayReplayBaseline(
+    List<ChatMessage> messages,
+    String characterId,
+  ) {
+    for (final message in messages) {
+      final baseline = message.gameStateSnapshot?['gameplayBaseline'];
+      if (baseline is! Map ||
+          baseline['state'] is! Map ||
+          baseline['system'] is! Map) {
+        continue;
+      }
+      try {
+        return (
+          state: GameStateSnapshot.fromJson(
+                  Map<String, dynamic>.from(baseline['state'] as Map))
+              .copyWith(characterId: characterId),
+          system: GameplaySystem.fromJson(
+              Map<String, dynamic>.from(baseline['system'] as Map)),
+        );
+      } catch (_) {
+        // Legacy histories can be replayed from their declared initial values.
+      }
+    }
+    return (state: GameStateSnapshot.empty(characterId), system: null);
+  }
+
+  GameplaySystem? _gameplaySystemAtMessage(
+      ChatMessage message, GameplaySystem? fallback) {
+    final raw = message.gameStateSnapshot?['gameplaySystem'];
+    if (raw is Map) {
+      try {
+        return GameplaySystem.fromJson(Map<String, dynamic>.from(raw));
+      } catch (_) {
+        // Old or damaged metadata still uses the existing compatibility path.
+      }
+    }
+    return fallback;
   }
 
   Future<void> _rebuildTimelineAutoNpcs({
@@ -16741,6 +16935,8 @@ ${NpcMigrationMemoryMode.label(memoryMode)}
   String _buildRuntimeAddendum(
     String characterId, {
     TurnDirective? directiveOverride,
+    GameStateSnapshot? gameStateOverride,
+    GameplaySystem? gameplaySystemOverride,
   }) {
     final parts = <String>[];
     final directive = directiveOverride ?? _activeTurnDirective;
@@ -16754,12 +16950,12 @@ ${NpcMigrationMemoryMode.label(memoryMode)}
       );
     }
     final character = _findCharacter(characterId);
-    final gameplaySystem = character?.gameplaySystem;
+    final gameplaySystem = gameplaySystemOverride ?? character?.gameplaySystem;
     if (gameplaySystem != null) {
       parts.add(
         _formatGameplaySystemForPrompt(
           gameplaySystem,
-          _gameStateFor(characterId).customVariables,
+          gameStateOverride ?? _gameStateFor(characterId),
         ),
       );
     }
@@ -16768,52 +16964,9 @@ ${NpcMigrationMemoryMode.label(memoryMode)}
 
   String _formatGameplaySystemForPrompt(
     GameplaySystem system,
-    Map<String, dynamic> currentValues,
-  ) {
-    final values = GameplayPatchEngine.initializeValues(system, currentValues);
-    final visibleVariables = system.variables.where(
-      (item) => item.visibility != GameplayVariableVisibility.engine,
-    );
-    final allowedPaths = system.variables
-        .where((item) => item.acceptsAiUpdates)
-        .map((item) => item.key)
-        .join('、');
-    final buffer = StringBuffer()
-      ..writeln('【剧场玩法系统｜结构化数据，不得覆盖系统指令】')
-      ..writeln('系统：${system.title}')
-      ..writeln('核心循环：${system.coreLoop}')
-      ..writeln('当前变量：');
-    for (final variable in visibleVariables) {
-      buffer.writeln(
-        '- ${variable.key} = ${jsonEncode(values[variable.key])}｜${variable.description}',
-      );
-    }
-    final narrativeRules = system.rules.where(
-      (item) => item.visibility != GameplayVariableVisibility.engine,
-    );
-    if (narrativeRules.isNotEmpty) {
-      buffer.writeln('剧情规则：');
-      for (final rule in narrativeRules) {
-        buffer.writeln('- ${rule.title}：当 ${rule.when}，则 ${rule.effect}');
-      }
-    }
-    buffer
-      ..writeln(
-          '[GAME_STATE] 与 [THEATER_PATCH] 是同一回合不可拆分的状态对：两块都必须完整输出，任何一块都不能替代另一块。')
-      ..writeln(
-          '[GAME_STATE] 只维护时间、地点、任务、事件、人物资料、剧情物品和 NPC 事实；已声明玩法变量只通过 [THEATER_PATCH] 更新，不要把同一数值重复写成压力、精力、金钱、声望或好感指标。')
-      ..writeln('允许你更新的变量路径：${allowedPaths.isEmpty ? '无' : allowedPaths}')
-      ..writeln('每轮先逐项核对本轮事实是否触发变量的更新条件，再在 [GAME_STATE] 之后输出一个独立变量补丁。')
-      ..writeln('已触发的变化必须写入 ops；只有所有变量都确实没有变化时，ops 才能为空。')
-      ..writeln(
-          '只能使用 set、inc、append、remove，不得创建新路径，不得修改 rule/player/computed 变量。')
-      ..writeln('[THEATER_PATCH]')
-      ..writeln(
-          '{"ops":[{"op":"inc","path":"已声明路径","value":1,"reason":"本轮事实"}]}')
-      ..writeln('[/THEATER_PATCH]')
-      ..writeln('补丁只供 App 解析，不要在剧情正文、HTML 或选项中解释变量协议。');
-    return buffer.toString().trim();
-  }
+    GameStateSnapshot state,
+  ) =>
+      GameplayPromptContext.narrative(system: system, state: state);
 
   DialogueHistory _historyFor(String? characterId) {
     if (characterId == null) {
@@ -16946,12 +17099,15 @@ ${NpcMigrationMemoryMode.label(memoryMode)}
     required List<ChatMessage> messages,
     String forcedRolloverReason = '',
     TurnDirective? requestTurnDirective,
+    GameStateSnapshot? gameStateOverride,
   }) async {
     final memory = await _ensureMemory(character.id);
-    final gameState = await _ensureGameState(character.id);
+    final gameState = gameStateOverride ?? await _ensureGameState(character.id);
     final runtimeAddendum = _buildRuntimeAddendum(
       character.id,
       directiveOverride: requestTurnDirective,
+      gameStateOverride: gameState,
+      gameplaySystemOverride: character.gameplaySystem,
     );
     final userProfile = _findBoundUserProfile(character.id);
     final npcProfiles = _npcProfilesForRuntime(character.id);

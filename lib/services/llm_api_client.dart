@@ -20,6 +20,7 @@ import '../models/world_book.dart';
 import '../utils/api_endpoint_resolver.dart';
 import 'message_content_parser.dart';
 import 'gameplay_system_parser.dart';
+import 'gameplay_prompt_context.dart';
 import 'token_estimator.dart';
 
 class LlmApiException implements Exception {
@@ -936,7 +937,11 @@ $originalReply
     }
     buffer
       ..writeln('只允许修改 authority=ai 的已声明路径。')
-      ..writeln('操作只允许 set、inc、append、remove。');
+      ..writeln('操作只允许 set、inc、append、remove；程序规则费用、效果和 rule 时钟不得重复结算。')
+      ..writeln(GameplayPromptContext.threadInstructions);
+    if (gameState != null) {
+      buffer.writeln('已保存的承诺与余波：${GameplayPromptContext.consequences(gameState)}');
+    }
     return buffer.toString().trim();
   }
 

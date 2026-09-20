@@ -1,4 +1,5 @@
 import '../services/npc_message_classifier.dart';
+import 'gameplay_runtime.dart';
 
 class StoryInventoryItem {
   const StoryInventoryItem({
@@ -185,6 +186,7 @@ class GameStateSnapshot {
     this.gameplayVariableChanges = const <String>[],
     this.gameplayPlayerVariableChanges = const <String>[],
     this.gameplayVariableWarnings = const <String>[],
+    this.gameplayRuntime = const GameplayRuntimeState(),
   });
 
   factory GameStateSnapshot.empty(String characterId) {
@@ -230,6 +232,10 @@ class GameStateSnapshot {
           _readStringList(json['gameplayPlayerVariableChanges']),
       gameplayVariableWarnings:
           _readStringList(json['gameplayVariableWarnings']),
+      gameplayRuntime: json['gameplayRuntime'] is Map
+          ? GameplayRuntimeState.fromJson(
+              Map<String, dynamic>.from(json['gameplayRuntime'] as Map))
+          : const GameplayRuntimeState(),
     );
   }
 
@@ -256,6 +262,7 @@ class GameStateSnapshot {
   final List<String> gameplayVariableChanges;
   final List<String> gameplayPlayerVariableChanges;
   final List<String> gameplayVariableWarnings;
+  final GameplayRuntimeState gameplayRuntime;
 
   bool get hasNarrativeState {
     return location.trim().isNotEmpty ||
@@ -277,7 +284,9 @@ class GameStateSnapshot {
   }
 
   bool get isEmpty {
-    return !hasNarrativeState && customVariables.isEmpty;
+    return !hasNarrativeState &&
+        customVariables.isEmpty &&
+        gameplayRuntime.isEmpty;
   }
 
   GameStateSnapshot copyWith({
@@ -304,6 +313,7 @@ class GameStateSnapshot {
     List<String>? gameplayVariableChanges,
     List<String>? gameplayPlayerVariableChanges,
     List<String>? gameplayVariableWarnings,
+    GameplayRuntimeState? gameplayRuntime,
   }) {
     return GameStateSnapshot(
       characterId: characterId ?? this.characterId,
@@ -333,6 +343,7 @@ class GameStateSnapshot {
           gameplayPlayerVariableChanges ?? this.gameplayPlayerVariableChanges,
       gameplayVariableWarnings:
           gameplayVariableWarnings ?? this.gameplayVariableWarnings,
+      gameplayRuntime: gameplayRuntime ?? this.gameplayRuntime,
     );
   }
 
@@ -365,6 +376,7 @@ class GameStateSnapshot {
         'gameplayPlayerVariableChanges': gameplayPlayerVariableChanges,
       if (gameplayVariableWarnings.isNotEmpty)
         'gameplayVariableWarnings': gameplayVariableWarnings,
+      if (!gameplayRuntime.isEmpty) 'gameplayRuntime': gameplayRuntime.toJson(),
     };
   }
 

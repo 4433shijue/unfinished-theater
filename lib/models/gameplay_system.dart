@@ -1,3 +1,5 @@
+import 'gameplay_runtime.dart';
+
 enum GameplayVariableType {
   number,
   text,
@@ -58,6 +60,10 @@ class GameplayVariableDefinition {
     this.maxDelta,
     this.options = const <String>[],
     this.stages = const <GameplayVariableStage>[],
+    this.playerHint = '',
+    this.isCore = false,
+    this.advanceOnTimeChange,
+    this.revealWhen = const <GameplayCondition>[],
   });
 
   factory GameplayVariableDefinition.fromJson(Map<String, dynamic> json) {
@@ -108,6 +114,10 @@ class GameplayVariableDefinition {
       maxDelta: _readDouble(json['maxDelta']),
       options: options,
       stages: stages,
+      playerHint: json['playerHint']?.toString().trim() ?? '',
+      isCore: json['isCore'] == true,
+      advanceOnTimeChange: _readDouble(json['advanceOnTimeChange']),
+      revealWhen: _readConditions(json['revealWhen']),
     );
   }
 
@@ -124,6 +134,10 @@ class GameplayVariableDefinition {
   final double? maxDelta;
   final List<String> options;
   final List<GameplayVariableStage> stages;
+  final String playerHint;
+  final bool isCore;
+  final double? advanceOnTimeChange;
+  final List<GameplayCondition> revealWhen;
 
   bool get isValid =>
       _gameplayVariableKeyPattern.hasMatch(key) && !mirrorsNpcRelationship;
@@ -204,6 +218,12 @@ class GameplayVariableDefinition {
         'authority': authority.name,
         'initialValue': initialValue,
         'description': description,
+        if (playerHint.isNotEmpty) 'playerHint': playerHint,
+        if (isCore) 'isCore': isCore,
+        if (advanceOnTimeChange != null)
+          'advanceOnTimeChange': advanceOnTimeChange,
+        if (revealWhen.isNotEmpty)
+          'revealWhen': revealWhen.map((item) => item.toJson()).toList(),
         if (min != null) 'min': min,
         if (max != null) 'max': max,
         if (maxDelta != null) 'maxDelta': maxDelta,
@@ -213,6 +233,66 @@ class GameplayVariableDefinition {
       };
 }
 
+class GameplayCondition {
+  const GameplayCondition({required this.path, required this.op, this.value});
+
+  factory GameplayCondition.fromJson(Map<String, dynamic> json) =>
+      GameplayCondition(
+        path: json['path']?.toString().trim() ?? '',
+        op: json['op']?.toString().trim() ?? '',
+        value: json['value'],
+      );
+
+  final String path;
+  final String op;
+  final dynamic value;
+
+  Map<String, dynamic> toJson() => {'path': path, 'op': op, 'value': value};
+}
+
+typedef GameplayRuleCondition = GameplayCondition;
+
+class GameplayRuleCost {
+  const GameplayRuleCost({required this.path, required this.amount});
+
+  factory GameplayRuleCost.fromJson(Map<String, dynamic> json) =>
+      GameplayRuleCost(
+        path: json['path']?.toString().trim() ?? '',
+        amount: _readDouble(json['amount']) ?? -1,
+      );
+
+  final String path;
+  final double amount;
+
+  Map<String, dynamic> toJson() => {'path': path, 'amount': amount};
+}
+
+class GameplayRuleEffect {
+  const GameplayRuleEffect({required this.op, required this.path, this.value});
+
+  factory GameplayRuleEffect.fromJson(Map<String, dynamic> json) =>
+      GameplayRuleEffect(
+        op: json['op']?.toString().trim() ?? '',
+        path: json['path']?.toString().trim() ?? '',
+        value: json['value'],
+      );
+
+  final String op;
+  final String path;
+  final dynamic value;
+
+  Map<String, dynamic> toJson() => {'op': op, 'path': path, 'value': value};
+}
+
+List<GameplayCondition> _readConditions(dynamic value) => value is List
+    ? value
+        .whereType<Map>()
+        .take(17)
+        .map((item) =>
+            GameplayCondition.fromJson(Map<String, dynamic>.from(item)))
+        .toList()
+    : const <GameplayCondition>[];
+
 class GameplayRuleDefinition {
   const GameplayRuleDefinition({
     required this.id,
@@ -220,6 +300,13 @@ class GameplayRuleDefinition {
     required this.when,
     required this.effect,
     required this.visibility,
+    this.conditions = const <GameplayCondition>[],
+    this.costs = const <GameplayRuleCost>[],
+    this.effects = const <GameplayRuleEffect>[],
+    this.threads = const <GameplayThreadOperation>[],
+    this.once = true,
+    this.cooldownTurns = 0,
+    this.playerSummary = '',
   });
 
   factory GameplayRuleDefinition.fromJson(Map<String, dynamic> json) {
@@ -232,6 +319,30 @@ class GameplayRuleDefinition {
       when: json['when']?.toString().trim() ?? '',
       effect: json['effect']?.toString().trim() ?? '',
       visibility: _visibilityFromValue(json['visibility']?.toString()),
+      conditions: _readConditions(json['conditions']),
+      costs: (json['costs'] is List ? json['costs'] as List : const [])
+          .whereType<Map>()
+          .take(17)
+          .map((item) =>
+              GameplayRuleCost.fromJson(Map<String, dynamic>.from(item)))
+          .toList(),
+      effects: (json['effects'] is List ? json['effects'] as List : const [])
+          .whereType<Map>()
+          .take(25)
+          .map((item) =>
+              GameplayRuleEffect.fromJson(Map<String, dynamic>.from(item)))
+          .toList(),
+      threads: (json['threads'] is List ? json['threads'] as List : const [])
+          .whereType<Map>()
+          .take(9)
+          .map((item) =>
+              GameplayThreadOperation.fromJson(Map<String, dynamic>.from(item)))
+          .toList(),
+      once: json['once'] != false,
+      cooldownTurns:
+          (int.tryParse(json['cooldownTurns']?.toString() ?? '') ?? 0)
+              .clamp(0, 10000),
+      playerSummary: json['playerSummary']?.toString().trim() ?? '',
     );
   }
 
@@ -240,6 +351,16 @@ class GameplayRuleDefinition {
   final String when;
   final String effect;
   final GameplayVariableVisibility visibility;
+  final List<GameplayCondition> conditions;
+  final List<GameplayRuleCost> costs;
+  final List<GameplayRuleEffect> effects;
+  final List<GameplayThreadOperation> threads;
+  final bool once;
+  final int cooldownTurns;
+  final String playerSummary;
+
+  bool get isExecutable =>
+      conditions.isNotEmpty && (effects.isNotEmpty || threads.isNotEmpty);
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'id': id,
@@ -247,6 +368,17 @@ class GameplayRuleDefinition {
         'when': when,
         'effect': effect,
         'visibility': visibility.name,
+        if (conditions.isNotEmpty)
+          'conditions': conditions.map((item) => item.toJson()).toList(),
+        if (costs.isNotEmpty)
+          'costs': costs.map((item) => item.toJson()).toList(),
+        if (effects.isNotEmpty)
+          'effects': effects.map((item) => item.toJson()).toList(),
+        if (threads.isNotEmpty)
+          'threads': threads.map((item) => item.toJson()).toList(),
+        'once': once,
+        'cooldownTurns': cooldownTurns,
+        if (playerSummary.isNotEmpty) 'playerSummary': playerSummary,
       };
 }
 
@@ -297,13 +429,16 @@ class GameplaySystem {
     }
 
     final rules = <GameplayRuleDefinition>[];
+    final seenRuleIds = <String>{};
     final rawRules = json['rules'];
     if (rawRules is List) {
       for (final raw in rawRules.whereType<Map>()) {
         final rule = GameplayRuleDefinition.fromJson(
           Map<String, dynamic>.from(raw),
         );
-        if (rule.when.isEmpty || rule.effect.isEmpty) {
+        if ((!rule.isExecutable &&
+                (rule.when.isEmpty || rule.effect.isEmpty)) ||
+            !seenRuleIds.add(rule.id)) {
           continue;
         }
         rules.add(rule);
@@ -442,10 +577,10 @@ dynamic _normalizeValue(
 }
 
 double? _readDouble(dynamic value) {
-  if (value is num) {
-    return value.toDouble();
-  }
-  return double.tryParse(value?.toString() ?? '');
+  final parsed = value is num
+      ? value.toDouble()
+      : double.tryParse(value?.toString() ?? '');
+  return parsed != null && parsed.isFinite ? parsed : null;
 }
 
 List<String> _readStrings(dynamic value) {

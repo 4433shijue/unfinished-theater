@@ -29,6 +29,35 @@ class ReleaseNotes {
 }
 
 const ReleaseNotes currentReleaseNotes = ReleaseNotes(
+  id: 'v2.11.0',
+  version: 'V2.11.0',
+  title: 'V2.11.0 让变量参与剧情',
+  subtitle: '行动有提示，回合有反馈；规则、时钟和承诺可以在作者工作台里编辑与预演。',
+  items: <ReleaseNoteItem>[
+    ReleaseNoteItem(
+      icon: Icons.insights_outlined,
+      title: '行动提示与回合反馈',
+      description: '玩家面板优先展示关键变量和行动提示，每轮回复附上可见的状态变化，承诺与余波也能继续追踪。',
+    ),
+    ReleaseNoteItem(
+      icon: Icons.rule_outlined,
+      title: '规则按条件结算',
+      description: '结构化规则支持条件、资源代价、冷却和一次性事件，由本地程序结算；剧情时间变化可以推进时钟，承诺可记录完成或落空。',
+    ),
+    ReleaseNoteItem(
+      icon: Icons.edit_note_rounded,
+      title: '作者草稿与本地预演',
+      description: '生成结果先进入草稿，可编辑变量和规则、锁定分组、查看改动差异，再决定应用；本地预演使用独立状态，方便检查规则效果。',
+    ),
+    ReleaseNoteItem(
+      icon: Icons.history_rounded,
+      title: '旧回合沿用当时的规则',
+      description: '重生成、格式修复和剧情分支会按对应历史状态与规则快照重新计算，避免把后来的资源和规则带回旧回合。',
+    ),
+  ],
+);
+
+const ReleaseNotes _v2105ReleaseNotes = ReleaseNotes(
   id: 'v2.10.5',
   version: 'V2.10.5',
   title: 'V2.10.5 提示词精简',
@@ -37,12 +66,14 @@ const ReleaseNotes currentReleaseNotes = ReleaseNotes(
     ReleaseNoteItem(
       icon: Icons.auto_fix_high_outlined,
       title: 'HTML 协议去重',
-      description: '“至少一个 HTML 代码块”“适配手机”“别在正文解释实现”等要求此前在固定协议里重复出现 4-5 次，现在只保留完整版一处，其余改为引用，指令更一致。',
+      description:
+          '“至少一个 HTML 代码块”“适配手机”“别在正文解释实现”等要求此前在固定协议里重复出现 4-5 次，现在只保留完整版一处，其余改为引用，指令更一致。',
     ),
     ReleaseNoteItem(
       icon: Icons.bolt_outlined,
       title: '固定前缀更短',
-      description: '每条请求的固定前缀精简约 200-300 字，模型规则冲突减少，格式修复触发率会下降（修复是额外一次请求，这才是省钱的点）。',
+      description:
+          '每条请求的固定前缀精简约 200-300 字，模型规则冲突减少，格式修复触发率会下降（修复是额外一次请求，这才是省钱的点）。',
     ),
     ReleaseNoteItem(
       icon: Icons.auto_awesome_outlined,
@@ -120,7 +151,8 @@ const ReleaseNotes _v2103ReleaseNotes = ReleaseNotes(
     ReleaseNoteItem(
       icon: Icons.forum_outlined,
       title: '修复 NPC 私聊输入栏消失',
-      description: 'NPC 私聊页的输入栏曾与主聊天共用教程定位 key，页面压栈后输入栏会被截断；现在 NPC 私聊输入栏独立渲染，发送与小飞机恢复可用。',
+      description:
+          'NPC 私聊页的输入栏曾与主聊天共用教程定位 key，页面压栈后输入栏会被截断；现在 NPC 私聊输入栏独立渲染，发送与小飞机恢复可用。',
     ),
   ],
 );
@@ -149,17 +181,20 @@ const ReleaseNotes _v2102ReleaseNotes = ReleaseNotes(
     ReleaseNoteItem(
       icon: Icons.fact_check_outlined,
       title: '超预算时给出明确提示',
-      description: '当协议、世界书、记忆与状态面板本身超出 Prompt 预算时，故事洞察会提示精简固定上下文或调大预算，避免缓存阶段反复重建。',
+      description:
+          '当协议、世界书、记忆与状态面板本身超出 Prompt 预算时，故事洞察会提示精简固定上下文或调大预算，避免缓存阶段反复重建。',
     ),
     ReleaseNoteItem(
       icon: Icons.library_books_outlined,
       title: '检查点不再漏掉内容',
-      description: '检查点优先收录最近的记忆，且只把真正写入检查点的内容标记为已注入，超量记忆与世界书会继续随本轮快照注入，不再静默丢失。',
+      description:
+          '检查点优先收录最近的记忆，且只把真正写入检查点的内容标记为已注入，超量记忆与世界书会继续随本轮快照注入，不再静默丢失。',
     ),
     ReleaseNoteItem(
       icon: Icons.speed_rounded,
       title: '自动预算统一为 64K',
-      description: '非 DeepSeek 接口的自动 Prompt 预算从保守的 8.4K 提升到 64K，与 DeepSeek 官方接口一致；模型上下文偏小或中转站容易报错时，可在设置页手动选择更小的预算。',
+      description:
+          '非 DeepSeek 接口的自动 Prompt 预算从保守的 8.4K 提升到 64K，与 DeepSeek 官方接口一致；模型上下文偏小或中转站容易报错时，可在设置页手动选择更小的预算。',
     ),
   ],
 );
@@ -1644,6 +1679,7 @@ const ReleaseNotes _v210ReleaseNotes = ReleaseNotes(
 
 const List<ReleaseNotes> releaseNotesHistory = <ReleaseNotes>[
   currentReleaseNotes,
+  _v2105ReleaseNotes,
   _v2104ReleaseNotes,
   _v2103ReleaseNotes,
   _v2102ReleaseNotes,
