@@ -1558,10 +1558,11 @@ class AppStateController extends ChangeNotifier {
       final memory = await _ensureMemory(character.id);
       final raw = await _apiClient.runUtilityTask(
         settings: _settings,
-        systemPrompt: '你是文字游戏的世界事件日历规划助手。只输出 JSON，不要输出解释。',
+        systemPrompt:
+            '你为文字游戏规划未来事件。只输出一个符合指定结构的 JSON 对象，不要 Markdown 围栏、解释或注释。计划必须接得上已知人物、时间和世界规则，不能把备选事件当成已经发生的事实。',
         userPrompt: '''
 请根据当前文字游戏生成 6-10 个后续世界事件日历条目。
-这些事件不是立刻发生，而是作为未来剧情可参考的节奏表。
+这些条目是可调整的未来节奏表，不立即发生。每条围绕一个明确触发条件、参与者和可能后果展开，避免只有“危机升级”之类空泛标题；时间不明时用相对阶段，不捏造精确日期，不预先替玩家作出选择。
 输出 JSON：
 {
   "events": [
@@ -2421,31 +2422,37 @@ ${history.messages.reversed.take(12).toList().reversed.map((message) => '${messa
     if (_isSending) {
       return '当前还有内容正在生成，请稍等。';
     }
-    final state = await _ensureGameState(character.id);
-    final item = _findStoryInventoryItem(state, itemId);
-    if (item == null) {
-      return '剧情物品栏里没有找到这个道具。';
-    }
-    if (!item.identified) {
-      return '这个道具效果未知，先花 3 啥币鉴定一下再投入主线比较稳。';
-    }
-    if (item.identified) {
-      return '这个道具已经鉴定过了。';
-    }
     const cost = 3;
-    if (_gamification.coins < cost) {
-      return '鉴定一次 3 啥币，钱包还差一点火候。';
-    }
-
-    await _updateGamification((state) => state.spendCoins(cost), notify: false);
+    var charged = false;
+    // Acquire before the first await so repeated clicks cannot charge twice.
     _isSending = true;
     notifyListeners();
     try {
+      final state = await _ensureGameState(character.id);
+      final item = _findStoryInventoryItem(state, itemId);
+      if (item == null) {
+        return '剧情物品栏里没有找到这个道具。';
+      }
+      if (item.identified) {
+        return '这个道具已经鉴定过了。';
+      }
+      if (_gamification.coins < cost) {
+        return '鉴定一次 3 啥币，钱包还差一点火候。';
+      }
+      final beforeCharge = _gamification;
+      try {
+        await _updateGamification((state) => state.spendCoins(cost),
+            notify: false);
+        charged = true;
+      } catch (_) {
+        _gamification = beforeCharge;
+        rethrow;
+      }
       final history = await _ensureHistory(character.id);
       final raw = await _apiClient.runUtilityTask(
         settings: _settings,
         systemPrompt:
-            '你是文游道具鉴定员。只输出 JSON，不要 Markdown：{"description":"鉴定后的说明","effect":"投入主线后可能造成的剧情影响"}',
+            '你是文游道具鉴定员。根据已有线索确定合理用途，不推翻物品来历。只输出一个 JSON 对象，不要 Markdown 围栏、解释或注释；两个字段都必须是非空字符串：{"description":"鉴定后的说明","effect":"投入主线后可能造成的剧情影响"}',
         userPrompt: '''
 当前模拟器：${character.name}
 未知道具：${item.name}
@@ -2453,30 +2460,52 @@ ${history.messages.reversed.take(12).toList().reversed.map((message) => '${messa
 最近剧情：
 ${_formatTranscript(history.messages.reversed.take(8).toList().reversed)}
 
-请鉴定这个道具的真实用途。用途要贴合当前世界观，可以有点怪，但不能直接替用户赢下主线。
+请鉴定这个道具的用途。description 用具体材质、外观或操作线索说明鉴定依据；effect 说清使用条件、可能作用及必要限制。可以奇特，但须符合已有世界规则，不能直接替用户赢下主线，也不能声称物品已经被使用。
 ''',
         temperature: 0.72,
         topP: 0.9,
       );
       final decoded = _decodeJsonObject(raw);
-      final description = decoded['description']?.toString().trim();
-      final effect = decoded['effect']?.toString().trim();
+      final description = decoded['description'];
+      final effect = decoded['effect'];
+      if (description is! String ||
+          description.trim().isEmpty ||
+          effect is! String ||
+          effect.trim().isEmpty) {
+        throw const FormatException('鉴定结果缺少有效的 description 或 effect。');
+      }
       final nextItem = item.copyWith(
-        description: (description == null || description.isEmpty)
-            ? '鉴定完成：${item.description}'
-            : description,
-        effect: (effect == null || effect.isEmpty) ? '由剧情自然决定用途。' : effect,
+        description: description.trim(),
+        effect: effect.trim(),
         identified: true,
       );
-      await _replaceStoryInventoryItem(character.id, nextItem);
-      await _updateGamification(
-        (state) => state.incrementStat('totalItemsIdentified'),
-        notify: false,
-      );
+      try {
+        await _replaceStoryInventoryItem(character.id, nextItem);
+      } catch (_) {
+        // The helper updates its cache before saving. Restore both so the
+        // refunded item remains unknown and can be retried.
+        _gameStateCache[character.id] = state;
+        await _store.saveGameState(state);
+        rethrow;
+      }
+      // The item and price are committed. A statistics failure must not turn
+      // a completed identification into a refunded, non-retryable failure.
+      final beforeStatistics = _gamification;
+      try {
+        await _updateGamification(
+          (state) => state.incrementStat('totalItemsIdentified'),
+          notify: false,
+        );
+      } catch (_) {
+        _gamification = beforeStatistics;
+      }
       return null;
     } catch (error) {
-      await _updateGamification((state) => state.addCoins(cost), notify: false);
-      return '鉴定失败，啥币已退回：$error';
+      if (charged) {
+        await _updateGamification((state) => state.addCoins(cost),
+            notify: false);
+      }
+      return charged ? '鉴定失败，啥币已退回：$error' : '鉴定失败：$error';
     } finally {
       _isSending = false;
       notifyListeners();
@@ -2515,7 +2544,7 @@ ${_formatTranscript(history.messages.reversed.take(8).toList().reversed)}
       final raw = await _apiClient.runUtilityTask(
         settings: _settings,
         systemPrompt:
-            '你是文游道具合成台。只输出 JSON，不要 Markdown：{"name":"新道具名","description":"说明","effect":"投入主线后的影响"}',
+            '你为文游设计合成物品，让结果保留两件原料中可辨认的特征。只输出一个 JSON 对象，不要 Markdown 围栏、解释或注释，字段使用非空字符串：{"name":"新道具名","description":"说明","effect":"投入主线后的影响"}',
         userPrompt: '''
 当前模拟器：${character.name}
 道具 A：${first.name}
@@ -2526,7 +2555,7 @@ ${_formatTranscript(history.messages.reversed.take(8).toList().reversed)}
 说明：${second.description}
 用途：${second.effect}
 
-请把两个道具合成一个怪但可用的新剧情物品。它要贴合当前世界观，效果可以有趣，但不能直接替用户赢下主线。
+请把两个道具合成一个符合世界观的新剧情物品。名字简短好记，说明交代原料如何组合，效果写清适用场景和限制。趣味来自两件原料的组合，不凭空获得全能能力；只设计物品，不叙述玩家已经使用或赢得主线。
 ''',
         temperature: 0.86,
         topP: 0.95,
@@ -2831,9 +2860,9 @@ NPC 简介：${npc.description.trim().isEmpty ? '暂无。' : npc.description.tr
 
 要求：
 1. 只输出 JSON，不要 Markdown。
-2. reply 是 NPC 私聊里的回应气泡，可以 80-220 字，像真实聊天或自然短场景，不推进主线。
+2. reply 是 80-220 字的 NPC 私聊回应。先回应这件具体礼物，语气依性格和关系而定，可以喜欢、犹豫或婉拒；不写玩家反应，不推进主线，也不自动把送礼写成表白。
 3. affinityDelta 范围 -10 到 12。普通合适礼物 1-5，特别戳中可以更高，不合适可以为负。
-4. impression 要写成自然中文，说明 TA 因这份礼物对用户角色的新印象。
+4. impression 用自然中文记下本次送礼确实支持的印象变化；没有变化就保持原判断，不添加没有发生的共同经历。
 
 JSON 格式：
 {"reply":"NPC回应","affinityDelta":0,"impression":"印象变化"}
@@ -2907,7 +2936,7 @@ JSON 格式：
 道具效果：${item.effect.trim().isEmpty ? '请结合当前剧情自然判断。' : item.effect.trim()}
 ${userNote.trim().isEmpty ? '' : '用户补充：${userNote.trim()}'}
 
-请把这次使用视为当前主线剧情的正式行动：生成一段使用结果，更新游戏面板、剧情记录、NPC 好感度、NPC 印象和六个下一步选项。不要把它写成商店小剧场，也不要说“这不影响主线”。''';
+把这次使用作为当前主线的正式行动，依据物品条件和当前场景呈现效果与后果。只记录确实发生的状态和 NPC 印象变化，不保证成功，不替用户追加行动。按当前对话模式的协议输出正文或群聊、状态块及适用的下一步选项。''';
 
     final currentHistory = await _ensureHistory(character.id);
     final userMessage = ChatMessage(
@@ -7564,7 +7593,7 @@ ${target.content}
         character: character,
         task: '玩家自由行动',
         instruction:
-            '玩家在当前地图地点执行行动：「$trimmed」。请根据当前地点、NPC关系、世界书和事件记录生成行动结果。结果必须影响当前主线状态，可以更新地点 HTML、当前场景、事件记录、NPC 印象、任务、线索或背包。必须给出新的 3-5 个 activeChoices，让用户在地图页内继续点下去。',
+            '玩家在当前地图地点执行行动：「$trimmed」。根据当前地点、NPC 关系、世界书和事件记录，写清行动遇到什么、人物如何回应、结果留下什么影响。状态只按实际后果更新，没获得线索或物品就不新增，失败也不强行补偿。不要替玩家执行后续行动；给出 3-5 个有明确对象和目的的 activeChoices。',
       ),
     );
   }
@@ -7616,7 +7645,7 @@ ${target.content}
         character: character,
         task: '时间推进',
         instruction:
-            '请将地图主线时间推进「$step」。推进后要更新当前时间、当前地点氛围、可能发生的事件、NPC 位置与动向、任务、线索、背包变化和 activeChoices。不要把它写成支线预告，这就是当前主线。',
+            '将地图主线时间推进「$step」，按已有日程、人物目标和事件条件交代期间发生的变化。当前时间应前进，NPC、任务、线索和背包只在有依据时更新，不要求每一项都变。玩家没有指定的行动不能自动完成；保留一处值得回应的局面，并给出 activeChoices。',
       ),
     );
   }
@@ -7739,7 +7768,7 @@ ${const JsonEncoder.withIndent('  ').convert(structuredPlan)}
 执行规则：
 1. 这是地图主线的正式下一回合，不是预演，不是旁支。
 2. 如果用户同时选择多个地点或行动，请按合理路线整合，不要机械逐条罗列。
-3. 如果计划之间有冲突，请在剧情里自然取舍，并说明角色实际完成了什么。
+3. 如果计划冲突或时间不足，按用户给定顺序处理可完成部分，明确哪些未执行，不替用户编造关键取舍或额外行动。
 4. 必须更新当前时间、当前位置、事件记录、地点 HTML，以及可能变化的 NPC 印象、任务、背包或游戏面板。
 5. 继续输出可交互 HTML，并在 [MAP_STATE] JSON 中写回最新地图状态。
 6. activeChoices 必须是用户下一步能直接点击的短行动，避免空泛预告。
@@ -8193,7 +8222,7 @@ ${choices.trim().isEmpty ? '暂无。' : choices}
 
 叙事硬性要求：
 1. 先输出不少于 2000 个中文字符的正式连续剧情正文，不要写成“结算说明”、规则日志、摘要列表或系统播报。
-2. 正文必须具体呈现场景变化、人物反应、NPC 对话和本轮行动造成的后果，并与最近聊天、角色设定和世界书连续。
+2. 按用户行动顺序组织场景，把结算事实转成可见的动作、阻力、NPC 回应与后果；每场都有信息或关系变化。关键互动展开，重复移动简述，不能为凑篇幅添加新事件、隐秘线索或额外结算。与最近聊天、角色设定和世界书保持连续。
 3. 不得替用户追加其没有选择的关键决定，不得把未执行的行动写成已经发生。
 4. 正文之后必须输出完整 [GAME_STATE] 和 [MAP_STATE]；不要输出 [CHOICES]。下一步行动只写进 activeChoices。
 
@@ -8624,6 +8653,7 @@ title, stage, mainGoal, locations, edges, spawnCandidates, mapInventory, quests,
 你是回合制地图的世界蓝图设计器。你只负责一次性生成固定世界数据，不负责后续回合叙事或状态更新。
 必须输出严格 JSON。地图必须是连通的无向有环图，所有地点、道路、NPC、任务和事件在首次生成后永久固定。
 不要输出 HTML、Markdown、自然语言前言、GAME_STATE 或 MAP_STATE 标签。
+名称便于辨认，地点、任务和事件要围绕当前世界的行动条件相互连接。描述写实际可见事物和可做的事，不堆背景设定；所有 id 引用必须指向同一 JSON 中已有对象，不能用气氛描写代替数值、布尔值或其他结构化字段。
 ''';
 
   Future<String?> generateConversationToolReply(
@@ -8806,15 +8836,17 @@ title, stage, mainGoal, locations, edges, spawnCandidates, mapInventory, quests,
         throw const LlmApiException('模型返回了空同人文。');
       }
 
-      // 完整性兜底：标题缺失或正文明显过短时，自动续写一次。
-      if (_extractFanficGeneratedTitle(trimmedContent).isEmpty ||
-          trimmedContent.length < 800) {
+      // 正文明显过短时续写一次；缺少标题由本地标题兜底，避免凭空追加情节。
+      if (trimmedContent.length < 800) {
         final continuation = StringBuffer();
         try {
           await for (final chunk in _apiClient.streamUtilityTask(
             settings: _settings,
             systemPrompt: _fanficSystemPrompt,
-            userPrompt: _buildFanficContinuationPrompt(trimmedContent),
+            userPrompt: _buildFanficContinuationPrompt(
+              originalPrompt: prompt,
+              partial: trimmedContent,
+            ),
             temperature: 0.7,
             topP: 0.9,
           )) {
@@ -8882,7 +8914,7 @@ title, stage, mainGoal, locations, edges, spawnCandidates, mapInventory, quests,
       title: '美化成互动面板',
       replaceOriginal: false,
       instruction:
-          '把目标回复改造成一个手机优先、可交互、可独立滚动的 HTML 剧情面板。保留原剧情信息，不新增重大剧情。输出一个完整 ```html 代码块```。可点击按钮必须带 data-prompt 或 data-action，按钮文本要能作为用户下一步行动。',
+          '把目标回复改造成手机优先、可独立滚动的 HTML 剧情面板。保留原人物、事件、数值和不确定信息，不新增行动结果；叙事、状态和已有选项分清层次，别把每一句都做成卡片。只输出一个完整 ```html 代码块```，隐藏协议字段不作为可见正文。仅将原有行动选项做成按钮，保留行动含义并添加 data-prompt 或 data-action，不创造新选项。',
     );
   }
 
@@ -8892,7 +8924,7 @@ title, stage, mainGoal, locations, edges, spawnCandidates, mapInventory, quests,
       title: '修复回复格式',
       replaceOriginal: true,
       instruction:
-          '修复目标回复的格式错误：补全 Markdown、HTML 代码块、[BUBBLE] 或 [CHOICES] 结构。不要改变剧情事实，不要大幅改写内容。如果存在 HTML，请输出完整可运行文档；如果有可点击按钮，请使用 data-prompt 或 data-action。',
+          '只修复目标回复的格式错误，输出完整修复结果，不解释过程。补全 Markdown、HTML 代码围栏以及原有 [BUBBLE]、[CHOICES]、[GROUP_CHAT]、[GAME_STATE]、[THEATER_PATCH]、[MAP_STATE] 的结构和闭合标签。保留原文的协议模式、JSON 字段、ID、数值、数组顺序、变量补丁与承诺线程，不新增状态变化，不把群聊改成普通叙事，不把字段文本强行改成 JSON。正文只作必要的断行或转义修正；HTML 使用完整文档，已有行动按钮保留其含义并使用 data-prompt 或 data-action。',
     );
   }
 
@@ -9406,37 +9438,37 @@ ${target.content}
           title: '上集提要',
           temperature: 0.35,
           instruction:
-              '根据最近聊天记录生成一段“上集提要”。要像电视剧前情回顾，简洁但有氛围，列出当前时间线、主角状态、最近关键事件和接下来最值得关注的问题。',
+              '根据最近聊天记录写一段 200-400 字的上集提要。先交代主角此刻在哪里、正在处理什么，再串起导致当前局面的关键事件，最后留下一个已有的未解问题。只回顾已经发生的事实，传闻和猜测保留原有的不确定性，不补剧情，不逐条复述闲聊。',
         ),
       'relationship' => const _ConversationUtilitySpec(
           title: '人物关系图',
           temperature: 0.45,
           instruction:
-              '从聊天记录中提取人物、身份、关系、好感变化和潜在线索，生成一个完整 ```html 代码块```。HTML 要手机优先，包含可展开人物卡、关系线说明和当前关系总结。',
+              '从记录中提取重要人物、身份和已确认的关系，生成一个完整 ```html 代码块```。手机优先，用可展开人物卡和简短关系线说明呈现。好感与生命周期以当前档案为准；人物说法、猜测和已发生事件分清，未知关系标为待确认。每条关系用一件实际互动说明，资料不足就少列，不编人物或数值。',
         ),
       'cover' => const _ConversationUtilitySpec(
           title: '剧情存档封面',
           temperature: 0.48,
           instruction:
-              '为当前剧情生成一个完整 ```html 代码块``` 作为存档封面，包含标题、当前章节、主角状态、最近大事件、当前目标和继续游玩的提示。',
+              '为当前剧情制作一个完整 ```html 代码块``` 存档封面。标题从本段剧情的具体场景或事件中取，配上当前章节、主角状态、最近关键事件和尚未完成的目标。信息简洁，便于用户一眼想起玩到哪里。继续游玩的提示只复述已有行动方向，不增加新任务、战果或关系。',
         ),
       'foreshadow' => const _ConversationUtilitySpec(
           title: '伏笔本',
           temperature: 0.38,
           instruction:
-              '根据聊天记录整理一个“伏笔本”。不要剧透未来，只记录已经出现但值得留意的细节、人物态度、未解决问题和可能的后续方向。可以用 Markdown，也可以用 HTML 面板。',
+              '根据聊天记录整理伏笔本，用 Markdown 或 HTML 面板记录已经出现的细节、未兑现的约定和未解决的问题。每项简述它在哪件事中出现、目前知道什么、还缺什么；可能解释单独标为推测，不宣布未来答案，也不把普通描写强行认定为伏笔。没有线索时直说，不凑条目。',
         ),
       'branch_preview' => const _ConversationUtilitySpec(
           title: '分支预演',
           temperature: 0.4,
           instruction:
-              '分析最近一次 AI 回复底部的选项，预演每个选项可能带来的短期后果。不要推进正式剧情，不要替用户做选择，只帮用户理解风险、收益和风格差异。',
+              '分析最近一次 AI 回复底部的实际选项；用户指定某项时只分析该项。每项用 2-4 句交代直接行动、可能收益和代价，并说明哪些结果尚不确定。依据当前人物、资源和已知规则推演，不泄露未知真相，不保证成功，不把预演记成已发生事实，不替用户选择。没有可识别选项时说明缺少选项，不另造一组选项。',
         ),
       'npc_diary' => const _ConversationUtilitySpec(
           title: 'NPC 日记',
           temperature: 0.64,
           instruction:
-              '根据当前剧情、NPC 档案和私聊印象，选择 1-3 个最相关 NPC，生成他们不会直接告诉用户的日记、备忘或内心独白。内容独立保存为工具记录，不推进主线，不生成 [CHOICES]，可用 Markdown 或 HTML 美化。',
+              '根据当前剧情、NPC 档案和私聊印象，选择 1-3 个最相关 NPC，各写 200-400 字的日记、备忘或内心独白。让每个人围绕一件自己知道、放不下或正在拿主意的事来写，语气随身份与关系区分。可补情绪和小动作，不凭空确认秘密、共同往事或恋爱关系。独立保存为工具记录，不推进主线，不生成 [CHOICES]，可用 Markdown 或 HTML。',
         ),
       'world_feed' ||
       'forum_burst' ||
@@ -9445,74 +9477,74 @@ ${target.content}
           title: '世界动态',
           temperature: 0.72,
           instruction:
-              '根据当前剧情生成世界观内的信息流，可使用朋友圈、论坛热帖、公告栏或小道消息等版式。包含多条不同来源的动态、评论和合理误读，不能把未经证实的传闻写成事实。内容独立保存，不推进主线，不生成 [CHOICES]，优先用完整 HTML 做成可滚动信息流。',
+              '根据当前剧情生成世界观内的信息流，可选朋友圈、论坛、公告栏或小道消息版式。写 4-6 条来源和语气有区别的动态，配少量真正接话的评论；每条有一个具体话题，避免所有人轮流夸主角。公开消息、私人猜测和传闻要可辨，NPC 不得知道未接触的秘密。独立保存，不推进主线，不生成 [CHOICES]，优先用完整 HTML 做成可滚动信息流。',
         ),
       'inspiration_dice' => const _ConversationUtilitySpec(
           title: '灵感骰子',
           temperature: 0.72,
           instruction:
-              '根据当前剧情和用户角色状态，生成 6 个下一步行动灵感。A-C 要稳妥推进剧情，D-F 要逐步更出人意料但仍符合世界观。不要推进正式剧情，只给行动建议。',
+              '根据当前剧情和用户角色状态，按 A-F 给出 6 个不同的下一步行动灵感，每项 1-2 句。A-C 采用当前可用资源稳妥推进，D-F 尝试更意外但合乎世界规则的办法。明确做什么、找谁或查哪里，需要前提时说清前提。只给建议，不保证结果，不代替用户执行，不输出 [CHOICES] 协议块。',
         ),
       'dream_fragment' => const _ConversationUtilitySpec(
           title: '梦境碎片',
           temperature: 0.78,
           instruction:
-              '根据当前剧情生成一段梦境、番外、回忆或心理片段小剧场。要有氛围和人物情绪，正文不少于 2000 字。不要生成互动按钮，不要输出 [CHOICES]，不要反复向用户强调“不推进主线”。',
+              '围绕当前剧情中一个牵挂，写 500-900 字的梦境或心理片段。选少量具体意象，让人物做一件事、遇到一次变化，再停在醒来或情绪转折处。梦里的新情节只属于梦境，不能伪装成确定的旧事、未来预告或已揭开的秘密。不要生成互动按钮或 [CHOICES]，正文无需反复声明“不推进主线”。',
         ),
       'comedy_stage' => const _ConversationUtilitySpec(
           title: '吐槽小剧场',
           temperature: 0.78,
           instruction:
-              '根据当前剧情生成一段吐槽小剧场。可以让旁白、路人、NPC 或系统面板吐槽当前局面，语气要轻松有梗，正文不少于 2000 字。不要生成互动按钮，不要输出 [CHOICES]，不要反复向用户强调“不推进主线”。',
+              '围绕当前局面中一个具体的尴尬或误会，写 400-700 字的吐槽小剧场。可让旁白、路人或 NPC 接话，笑点来自人物目的和事情的错位，保留各自性格；不堆网络梗，不轮流重复同一句吐槽，不羞辱用户。作为独立番外，不新增主线事实，不生成互动按钮或 [CHOICES]。',
         ),
       'npc_gossip' => const _ConversationUtilitySpec(
           title: 'NPC 八卦小报',
           temperature: 0.76,
           instruction:
-              '根据当前剧情和 NPC 关系生成一份八卦小报小剧场。内容可以是传闻、误会、微妙关系观察和吃瓜评论，正文不少于 2000 字，但不能强行确认未发生事实。优先输出完整 ```html 代码块```，不要生成互动按钮，不要输出 [CHOICES]。',
+              '根据当前剧情和 NPC 关系做一份八卦小报，写 3-5 条短报道和少量吃瓜评论，总文字约 400-700 字。每条从一件已出现的小事切入，标题可以夸张，但正文要让读者分清目击、猜测与玩笑，不确认未发生的关系或秘密，不把所有关系都凑成恋爱。优先输出完整 ```html 代码块```，不生成互动按钮或 [CHOICES]。',
         ),
       'passerby_camera' => const _ConversationUtilitySpec(
           title: '路人视角镜头',
           temperature: 0.7,
           instruction:
-              '选一个符合当前世界观的路人视角，写 TA 看到主角或当前事件的小剧场，正文不少于 2000 字。不替主角做决定，只补充旁观感和氛围。不要生成互动按钮，不要输出 [CHOICES]。',
+              '选一个符合世界观、此刻有自己事情要忙的路人，用 400-700 字写 TA 目睹当前事件的一小段经过。只写此人能看见、听见或合理猜测的内容，用其关注的细节表现视角；不读主角内心，不揭幕后秘密，不替主角追加行动或决定。不要生成互动按钮或 [CHOICES]。',
         ),
       'mood_radio' => const _ConversationUtilitySpec(
           title: '今日电台',
           temperature: 0.74,
           instruction:
-              '把当前剧情氛围整理成一段“今日电台”小剧场。包含天气、情绪、人物状态和假装正经的播音腔吐槽，正文不少于 2000 字。可以用 Markdown 或 HTML。不要生成互动按钮，不要输出 [CHOICES]。',
+              '把当前剧情写成 300-500 字的世界内电台短节目。用 2-3 条与当前事件有关的播报串起人物状态和轻微吐槽，让句子适合被读出声。天气只采用已有信息；未知情况可以留白，传闻要点明来源不明。播音腔可以一本正经，内容不要堆口号或总结人生。可用 Markdown 或 HTML，不生成互动按钮或 [CHOICES]。',
         ),
       'prophecy_trash' => const _ConversationUtilitySpec(
           title: '离谱预言垃圾桶',
           temperature: 0.86,
           instruction:
-              '生成一段很会胡说但有趣的“离谱预言”小剧场。它可以给玩家提供脑洞和笑点，正文不少于 2000 字，但必须保持不可靠、半开玩笑的气质。不要生成互动按钮，不要输出 [CHOICES]。',
+              '从当前剧情里一件小事出发，写 250-450 字的离谱预言小剧场。给出 2-3 个互相接得上的荒诞推断，让说预言的人露出自己的偏心或误解，结尾落在一个具体笑点。语气须让人看出是玩笑与猜想，不能变成真实预告或主线规则。不要生成互动按钮或 [CHOICES]。',
         ),
       // ── 小剧场道具 ──
       'child_spray' => const _ConversationUtilitySpec(
           title: '变小孩喷雾',
           temperature: 0.68,
           instruction:
-              '根据用户描述，把指定 NPC 变成小孩，生成一段不低于 2000 字的纯文字剧情小剧场。要包含 NPC 变成小孩后的外貌、行为、对话和心理变化，带温馨或搞笑氛围。不要生成 HTML，不要生成互动按钮，不要输出 [CHOICES]，不要反复向用户强调“不推进主线”。',
+              '按用户描述写一段 600-1000 字的纯文字番外，让指定 NPC 暂时变成小孩。围绕一件日常小事展开，用行为和说话习惯保留 TA 原本的性格，再写身体与能力变化带来的麻烦或趣味。互动保持适龄、温馨或搞笑，不替玩家决定如何照顾 TA，不把变化写入主线。不要生成 HTML、互动按钮或 [CHOICES]。',
         ),
       'beast_ear_potion' => const _ConversationUtilitySpec(
           title: '兽耳魔药',
           temperature: 0.7,
           instruction:
-              '根据用户描述，让指定 NPC 长出兽耳，生成一段不低于 2000 字的纯文字剧情小剧场。要包含 NPC 长出兽耳后的反应、对话、互动场景。如果用户指定了耳朵类型就用指定的，否则由 AI 自由发挥适合该 NPC 的动物耳朵。不要生成 HTML，不要生成互动按钮，不要输出 [CHOICES]，不要反复向用户强调“不推进主线”。',
+              '按用户描述写一段 500-900 字的纯文字番外，让指定 NPC 暂时长出兽耳。耳朵类型按用户指定，未指定则选适合其性格的一种。用一次发现、遮掩或意外暴露的互动表现 TA 的反应，别反复形容可爱；不默认任人触摸，不替玩家追加亲密行为，不改主线设定。不要生成 HTML、互动按钮或 [CHOICES]。',
         ),
       'touch' => const _ConversationUtilitySpec(
           title: '摸一摸',
           temperature: 0.62,
           instruction:
-              '根据用户指定的 NPC、触碰部位和可选的一句话，生成一段不低于 2000 字的温情感性纯文字小剧场。要细腻描写触碰的场景、NPC 的反应和双方的互动，氛围要柔软自然。不要生成 HTML，不要生成互动按钮，不要输出 [CHOICES]，不要反复向用户强调“不推进主线”。',
+              '根据用户指定的 NPC、触碰部位和一句话，写 250-500 字的纯文字小剧场。只展开这一次已指定的触碰，让 NPC 按当前关系和性格作出回应，也可以迟疑、躲开或拒绝。用动作与短对白表现情绪，不反复解释心动，不自动升级亲密关系，不替玩家追加动作、心理或承诺。不要生成 HTML、互动按钮或 [CHOICES]。',
         ),
       'truth_lollipop' => const _ConversationUtilitySpec(
           title: '真心话棒棒糖',
           temperature: 0.65,
           instruction:
-              '让指定 NPC 对用户角色说一段真心话。生成一段不低于 2000 字的纯文字小剧场，包含 NPC 说真心话时的场景、表情、语气和心理活动，以及用户角色的反应。内容要真诚有温度。不要生成 HTML，不要生成互动按钮，不要输出 [CHOICES]，不要反复向用户强调“不推进主线”。',
+              '让指定 NPC 围绕一件已有互动说一段真心话，写成 300-600 字的纯文字小剧场。先给一个具体的开口契机，再让 TA 按自己的习惯说出平时难说的话，可以有停顿、遮掩或不那么好听的实话。关系按现有路线发展，不一律变成告白，不新编秘密或共同往事。停在 NPC 的表达处，把玩家的反应留给玩家。不要生成 HTML、互动按钮或 [CHOICES]。',
         ),
       _ => null,
     };
@@ -9563,7 +9595,7 @@ ${npcFacts.trim().isEmpty ? '暂无。' : npcFacts}
 世界书：
 $worldBooks
 
-用户本次补充要求：
+用户本次补充要求（明确指定的篇幅和文体优先于工具默认建议，输出协议与事实边界保持不变）：
 ${userRequest.trim().isEmpty ? '无。' : userRequest.trim()}
 
 长期记忆：
@@ -9678,10 +9710,16 @@ ${_formatTranscript(recentMessages)}
     return '$pairingLabel · $shortInspiration';
   }
 
-  String _buildFanficContinuationPrompt(String partial) {
+  String _buildFanficContinuationPrompt({
+    required String originalPrompt,
+    required String partial,
+  }) {
     return '''
-上一轮生成的同人文可能不完整（缺少标题或正文过短）。
-请直接从断点继续补全正文，格式要求与之前一致：开头给出标题（标题：XXX），只输出标题和正文，不要重复已有内容，不要解释。
+【原创作任务与人物约束】
+$originalPrompt
+
+【续写任务】
+以下是已经交付的正文。沿用本篇灵感、人物和叙述视角，从断点接着写到完整收束，新增场景要带来行动、信息或关系变化。原文与新增正文合计满足原任务篇幅即可。只输出需要追加的正文，不重写标题，不重述开头，不重复已有段落，不解释。原任务中的开篇标题要求不适用于这次追加；不再另外起一篇故事。
 
 【已有内容】
 $partial
@@ -10687,7 +10725,7 @@ ${pendingMessages.map((message) => '- ${message.content}').join('\n')}
       npcName: npc.name,
     );
     return '''
-请把以下 NPC 整理成可复用的 NPC 角色卡。只补全干净人设，不生成新世界，不推进剧情，不写告别。
+请把以下已有 NPC 整理成可复用的角色卡。用实际互动提炼说话方式、行动倾向与边界，保留当前好感和已确认的关系。没有资料的重大经历留白，不以人设补全为由创造既成事实；不生成新世界、不推进剧情、不写告别。
 
 源模拟器：${character.name}
 源模拟器简介：
@@ -10763,6 +10801,7 @@ $inspiration
 4. impression 写 TA 初见或当前对玩家角色的印象，不要假装已经发生大量剧情。
 5. affinity 根据灵感判断，范围 -100 到 100。
 6. 如果用户已经写了角色卡，优先尊重原文，把它润色、补齐缺失字段，不要改掉核心人设。
+7. 灵感尚未展开时，可补一个当前目标、一处性格矛盾和两种具体互动习惯；每一项都要能落实成行为，不靠固定口癖或强行恋爱制造辨识度。
 ''';
   }
 
@@ -10949,9 +10988,9 @@ JSON 格式：
   ]
 }
 
-只提取最近剧情中已经实际出现或明确被提及、后续可能继续参与剧情的人物。
+只提取最近剧情中已经实际出现或明确被提及、后续可能继续参与剧情的人物。描述以已知事实为限，资料少时允许短于建议字数；未说明的身份、动机和共同经历不要补全。
 不要提取用户本人、AI 叙述者、班级/社团/家人这种泛称群体、纯物品、地点、系统面板或一次性无名路人。
-affinity 是 NPC 对用户角色的好感度，范围 -100 到 100；impression 是自然语言印象，两者必须分开。
+affinity 是 NPC 对用户角色的好感度，范围 -100 到 100；已有明确数值就沿用，否则保守判断，依据不足用 0。impression 用具体互动支持的自然语言印象，推测要保留不确定性，不把礼貌等同于爱意；两个字段必须分开。
 最多返回 6 个 NPC。没有合适 NPC 时返回 {"npcs":[]}。
 ''';
 
@@ -10974,11 +11013,11 @@ JSON 格式：
   }
 }
 
-messages 必须是 2-5 条，每条都要像真实手机聊天气泡：短、自然、带停顿感，可以有补充、迟疑、轻微情绪，但不要写大段旁白。
+messages 必须是 2-5 条简短手机聊天气泡，先接住用户这次真正说的事；后续气泡用于补充、试探或转移话题，别拆成重复的安慰句。措辞与熟悉程度符合 NPC 身份和关系，不靠固定口癖区分人物，不写旁白、舞台说明或用户的回复。
 affinityDelta 是本次私聊造成的好感变化，范围 -30 到 30，普通聊天通常在 -3 到 5 之间；summary 是自然语言印象，不要把好感度和印象混成一个字段。
 bondStage 必须按关系深度选择固定阶段：初见、熟悉、信任、牵绊、分岔、深羁绊；bondRoute 必须按主要关系倾向选择固定路线，不确定就用未知线，不要自造名称。
 summary 里禁止出现 summary、affinityDelta、attitude、relationshipShift、rememberedDetails、futureInfluence 等英文键名；这些内容只能放在 JSON 对应字段里。
-impressionPatch 会被系统保存并影响后续主线。
+impressionPatch 会被系统保存并影响后续主线。只记录本次聊天实际支持的变化，普通问候不升级关系；rememberedDetails 只留用户确实说过的细节，没有新信息可用空数组，futureInfluence 写互动倾向，不能预告确定的未来事件。
 ''';
 
   static const String _npcInnerVoiceSystemPrompt = '''
@@ -10988,13 +11027,14 @@ impressionPatch 会被系统保存并影响后续主线。
 输出要求：
 - 只输出一段中文文本，不要 JSON，不要 Markdown，不要标题。
 - 80-220 字，像用户偷听到 TA 此刻心里真正闪过的念头。
-- 心声可以和表面话语有反差，但不能推翻 NPC 已有人设和关系。
+- 围绕这一句气泡背后眼下的顾虑、欲望或没说出口的话来写，留在 NPC 能知道的范围。可以和表面话语有反差，但不编重大秘密或共同往事，不替用户判断感情，不推翻已有性格和关系。
 - 不要写“作为 NPC”“用户点击了心声”之类打破沉浸的话。
 ''';
 
   static const String _npcGiftSystemPrompt = '''
 你是文字游戏 App 的 NPC 送礼反馈引擎。
-你只处理用户给 NPC 送礼后的私聊反馈、好感变化和印象变化，不推进主线回合。
+你只处理用户给 NPC 送礼后的私聊反馈、好感变化和印象变化，不推进主线回合。回应要让人看出 NPC 在意礼物的哪一点，避免每次都用相同的惊喜和感谢。
+只输出一个符合用户给定字段与范围的 JSON 对象，不要 Markdown 围栏、解释或额外文字。
 ''';
 
   static const String _npcLetterSystemPrompt = '''
@@ -11006,14 +11046,15 @@ JSON 格式：
   "messages": ["NPC 主动消息第1个气泡", "NPC 主动消息第2个气泡"]
 }
 
-messages 必须是 1-3 条，每条都要像真实手机聊天气泡：自然、短、带一点人物性格和当前印象。
+messages 必须是 1-3 条简短手机聊天气泡。选一个 NPC 此刻有理由主动提起的小事、关心或未说完的话，用符合身份与关系的语气开口；后续气泡接住第一条，不重复问候。不要凭空声称已经见面、赠物或完成任务，也不要把所有关系写成想念或告白。
 不要写旁白，不要写舞台说明，不要替用户回复。
 不要输出“等待回复中”“明日将主动找对方”“邀请信已传递”等状态句；如果没有合适话语，也要改成 NPC 会真正发出的简短聊天。
 ''';
 
   static const String _utilitySystemPrompt = '''
-你是一个服务于 AI 角色扮演文字游戏 App 的辅助生成器。
-你只负责整理、转换、修复和美化既有内容，不要擅自改变已经发生的剧情事实。
+你为文字游戏完成本次指定的辅助任务，输出用户可以直接阅读或使用的结果。
+资料整理、回顾和格式修复只依据已知内容，区分事实与推测，不补写事件。梦境、番外和玩笑等创作任务可以在指定范围内创造场景与对白，保持人物、视角和因果一致，不能把新增内容写成主线既成事实。
+遵循本任务要求的格式与篇幅；篇幅是建议目标，信息或场景已经完整时即可收束，不用重复描述凑字。先写具体内容，不加“下面为你生成”之类开场，不在结尾总结创作意义。
 如果任务要求输出 HTML：
 1. 必须输出完整可运行的单文件 HTML，放在 ```html 代码块中。
 2. 不能引用外部 CSS、JS、图片或字体。
@@ -11031,7 +11072,7 @@ messages 必须是 1-3 条，每条都要像真实手机聊天气泡：自然、
 如果本篇灵感和主线世界观、地点、任务、门派、体系或时间线冲突，必须服从本篇灵感。
 禁止默认续写当前主线；禁止默认沿用当前地点、任务、世界观规则或正在发生的事件，除非本篇灵感明确要求。
 必须输出可直接阅读的中文正文，不要输出 HTML、JSON、代码块、互动按钮、[CHOICES]、[GAME_STATE]。
-正文至少 3000 字。不要把生成结果写成剧情工具说明，不要询问用户是否继续，直接完成作品。
+正文至少 3000 字，由完整的事件和场景变化支撑。先给人物眼下想办的事，让阻力、选择和后果推动关系；不同人物有自己的说话目的，关键互动展开，重复过程概述。细节跟随视角，动作已表达情绪就不再逐句解释，结尾落在行动后果或关系变化处。不要把生成结果写成工具说明，不询问是否继续，直接完成作品。
 ''';
 
   static const String _mysteryShopSystemPrompt = '''
@@ -11040,7 +11081,7 @@ messages 必须是 1-3 条，每条都要像真实手机聊天气泡：自然、
 
 你必须只输出 JSON 对象，不要 Markdown，不要解释，不要寒暄。
 不要生成小剧场券、工具券、装扮、贴纸、称号或纯 UI 装饰。
-商品必须能被用户在主线中使用，使用后可以影响剧情、NPC 好感度、NPC 印象、资源、线索、地点或状态。
+商品必须能被用户在主线中使用，作用可涉及人物互动、资源、线索、地点或状态。每件用具体用途区分，说明使用条件和合理限制，不把好感、获胜或秘密真相作为必然赠品，也不声称已经使用。
 ''';
 
   static const String _blackMarketSystemPrompt = '''
@@ -11049,7 +11090,7 @@ messages 必须是 1-3 条，每条都要像真实手机聊天气泡：自然、
 
 你必须只输出 JSON 对象，不要 Markdown，不要解释，不要寒暄。
 商品必须区别于神秘小卖部：不要便宜日用品，不要普通剧情小道具，不要功能券，不要装扮，不要称号，不要纯 UI 装饰。
-商品价格必须在 50-500 啥币之间；如果商品效果未知，可以让 effect 为空，但 description 必须写出足够明确的可疑感、用途暗示或代价线索。
+商品价格必须在 50-500 啥币之间。稀有感来自特殊用途、来历线索或代价，不靠堆砌神秘形容词；各件的能力和风险应有区别，不能凭购买就改写既成事实。效果未知时 effect 可以为空，description 须给出可观察的异常或用途线索，不直接揭穿留待鉴定的效果。
 ''';
 
   Future<String?> _runMapTask({
@@ -11205,7 +11246,7 @@ messages 必须是 1-3 条，每条都要像真实手机聊天气泡：自然、
 HTML 里的地点、时间和行动按钮必须使用 data-map-location、data-location-name、data-action 或 data-prompt，方便前端识别。
 地图页会直接读取 [MAP_STATE] 里的 currentScene、activeChoices、locations、discoveredClues、npcPositions 和 npcMovements 展示主线，所以这些字段必须认真填写，不能只依赖 HTML。
 如果当前地图状态已有地点列表，locations 必须沿用旧 id/name，不能新增、删除、改名或替换大地点；只更新地点状态、NPC、线索、最近场景、推荐行动、风险和时间成本。
-如果当前地图状态暂无地点，第一次生成必须给 6-7 个大地点。
+仅旧版地图当前没有地点时首次生成 6-7 个大地点；新版规则地图必须沿用提供的蓝图和本地结算状态，不能按旧版数量裁剪地点。若本次要求含“规则权威边界”，它优先于这里允许 AI 更新状态的一般说明。
 activeChoices 必须是 3-5 个能直接执行的短行动，不能写“继续探索”“观察周围”“推进剧情”这种空泛项。
 [MAP_STATE].eventSummary 必须用一句简体中文概括本轮真实发生的事件，地图事件日志会优先使用它，不要把整段正文塞进去。
 用户可见文本规则：地点名、按钮文案、线索、NPC 动向、currentLocationName、locations.name、locations.description、locations.scene、activeChoices.label、activeChoices.action 必须使用简体中文；英文或拼音 id 只允许放在 id/currentLocationId/locationId 等后台字段里，不能展示给用户。
@@ -11590,6 +11631,7 @@ ${recentMessages.trim().isEmpty ? '暂无。' : recentMessages}
 6. ${character.gameplaySystem == null ? '当前剧场没有玩法变量，不要新增 [THEATER_PATCH]。' : '保留或补齐 [THEATER_PATCH]，放在 [GAME_STATE] 和 [MAP_STATE] 之间；没有变化时输出 {"ops":[]}。'}
 7. currentLocationName、locations.name、locations.description、locations.scene、activeChoices.label/action 必须是用户可见中文。
 8. 不要输出解释，不要用 Markdown 包裹 [MAP_STATE] 或 [THEATER_PATCH]。
+9. 原任务有本地结算权威状态时，原样保留其固定字段；不得为补齐结构再次扣资源、推进时钟、改任务或增删道路。保留原有 THEATER_PATCH 的 ops 与 threads，没有事实依据时不补变量操作或承诺。
 
 ${allowLocationReset ? '本次允许重建大地点，但必须生成 6-7 个大地点。' : '本次不允许新增、删除、改名或替换大地点；必须沿用下列 id/name，缺失地点要补回：\n$lockedLocations'}
 
@@ -12185,10 +12227,10 @@ $events
 1. 地图模式不是支线。只要角色启用地图模式，地点探索、时间推进、地点行动就是主线剧情本身。
 2. 用户主要在聊天里阅读长剧情；地图只是组织地点和行动篮子。不要把输出写成纯按钮游戏。
 3. 不要和既有聊天记录、NPC印象、背包、任务、世界书冲突。如果必须变更状态，要在输出中交代原因。
-4. 第一次生成地图时必须生成 6-7 个“大地点”。大地点 id/name 之后长期锁定。
+4. 仅旧版地图且尚无地点列表时，首次生成 6-7 个“大地点”。新版规则地图使用输入中已生成的完整蓝图，不受此旧版数量要求约束。大地点 id/name 之后长期锁定。
 5. 如果提示中已有地点列表，后续输出必须沿用所有旧地点 id/name，不能新增、删除、改名、替换大地点；只能更新 status、description、scene、npcs、clues、nextActions、riskLevel、timeCost。
-6. 新版规则地图每次先由 App 本地引擎确定性结算，再由你根据结算前后状态生成正式主线叙事。activeChoices 和 nextActions 都应是可加入行动篮子的明确计划，如“前往旧图书馆调查借阅记录”“找林夏确认监控时间”。
-7. 每次输出必须包含可阅读的长剧情正文，接着可以包含一个可渲染的单文件 HTML。HTML 要适配手机屏幕，不引用外部资源。
+6. 新版规则地图只叙述本地已经结算的行动及后果；旧版地图按本次实际行动和已有规则推进，结果与代价须有因果依据。两种模式都不能替玩家追加决定。activeChoices 和 nextActions 是下一步计划，如“前往旧图书馆调查借阅记录”，不能写成已经执行。
+7. 每次输出必须包含可阅读的长剧情正文。围绕人物眼下的目标、遭遇和反应写，视角只呈现能知道的事；不把日志逐条扩写，不重复解释情绪。随后可附一个适配手机、不引用外部资源的单文件 HTML。
 8. 输出末尾必须同时给 App 独立 [GAME_STATE] 和 [MAP_STATE]。不要放进 HTML 里，也不要放进 Markdown 代码块里。
 9. [MAP_STATE] 是地图 UI 主数据。必须包含 currentLocationId、mainGoal、currentScene、locations、activeChoices、npcPositions、eventSummary。
 10. activeChoices 必须是 3-5 个能直接放入行动篮子的行动，不要写“继续探索”这种空泛选项；每个选项要有 kind、label、action、riskLevel、timeCost。
@@ -12271,7 +12313,7 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
 ''';
 
   static const String _mapRepairSystemPrompt = '''
-你是地图模式格式修复器。你的任务只修格式，不改剧情事实。
+你是地图模式格式修复器，只修格式，不润色或补写剧情。以原任务及本地权威状态为准，保留 ID、数值、数组顺序和既有状态变化；未知事实不填成确定结论，修复建议行动不代表执行行动。
 必须输出完整修复后的回复：用户可读正文、可选 HTML、[GAME_STATE]、原任务要求的 [THEATER_PATCH]、[MAP_STATE]。
 不要解释修复过程，不要输出 Markdown 代码块包裹 JSON，不要新增或改名已锁定大地点。
 用户可见地点名、按钮、线索和动向必须是简体中文；英文 id 只能留在 id/currentLocationId/locationId 字段。
@@ -13397,8 +13439,7 @@ F|做一个意外但仍合理的行动，打破当前僵局。
     final interval = _settings.mobilePowerSaveMode
         ? const Duration(milliseconds: 180)
         : const Duration(milliseconds: 40);
-    if (last == null ||
-        now.difference(last) >= interval) {
+    if (last == null || now.difference(last) >= interval) {
       _lastStreamingUiUpdateAt = now;
       return true;
     }
@@ -14880,7 +14921,7 @@ ${npcTranscript.trim().isEmpty ? '暂无。' : npcTranscript}
 
   static const String _npcRoleCardSystemPrompt = '''
 你是中文文字游戏 App 的 NPC 角色卡整理员。
-你的任务是把一个 NPC 整理成“可复用 NPC 角色卡”，只补全干净人设，不是生成新剧情、新世界、告别信或任务线。
+把输入整理成可复用的 NPC 角色卡。已有 NPC 以档案和实际互动为据；从灵感创建的新 NPC 可以补全人物设定。两种任务都不生成新世界、告别信、任务线或已经发生的新剧情。
 
 只输出 JSON，不要 Markdown，不要解释。
 JSON 格式：
@@ -14895,7 +14936,7 @@ JSON 格式：
 要求：
 - 角色卡必须让 NPC 能作为“另一个主角/同行者/重要角色”在别的世界自主行动。
 - 必须明确：玩家只操控玩家自己的角色；这个 NPC 自己行动、表达意见、推动支线，但不能替玩家做决定。
-- 可以合理补全人设细节，但不能推翻已有关系和性格。
+- 性格要落到取舍、习惯和说话方式上，不堆“温柔、神秘、复杂”等标签。可补与来源相容的外貌或习惯，不能编造既有 NPC 的重大往事、亲密关系和秘密。
 - 明确去掉或泛化原世界专属内容：原世界世界观、当前剧情事件、学校/朝代/地点等强绑定背景、原世界任务线。
 - 输出必须是简体中文。
 ''';
@@ -14941,13 +14982,13 @@ JSON 格式：
 ''';
 
   static const String _npcMigrationManifestSystemPrompt = '''
-你是文字游戏 App 的 NPC 迁徙档案整理器。根据输入的结构化生涯快照，生成唯一可信的 MigrationManifest。
+你整理 NPC 的迁徙档案，根据结构化生涯快照生成 MigrationManifest，供程序保持人物与记忆连续。档案写清发生了什么、关系如何走到现在，避免用抒情概括替代可核对的经历。
 
 只输出一个可解析的 JSON 对象，不要 Markdown 围栏、解释、注释或额外文字。
 字段名和层级必须严格遵守用户提供的 JSON schema。
 
 规则：
-- 只依据快照整理和谨慎补全，不得推翻已有 NPC 身份、性格、关系和明确事件。
+- 旧世界经历只依据快照，保留来源中的不确定性。没有依据的往事、秘密、承诺和关系不要补写；数组缺少事实时可留空。新任务或信物用途可以按输入要求设计，但要明确是未来方向，不能伪装成已发生事件。
 - memoryPolicy.mode 与 relationship.mode 必须原样使用用户指定的枚举值。
 - full 模式可在 runtimeFacts 保留筛选后的关键事实。
 - fragments 模式的 runtimeFacts 只能有 3-5 条不完整、带不确定感的片段。
@@ -14988,8 +15029,8 @@ JSON 格式：
 只输出一个可解析的 JSON 对象，不要 Markdown 围栏、解释、注释或额外文字。字段名和层级必须严格遵守用户提供的 JSON schema。
 
 规则：
-- 世界书只写长期世界规则、程序允许提供的记忆事实和关系边界，不重复整张角色卡。
-- 角色 sections 只写身份、语气、行为、关系互动和玩法，不复制世界书，不重复 App 的输出协议。
+- 世界书只写长期世界规则、程序允许提供的记忆事实和关系边界，不重复整张角色卡。把规则落到人物能做什么、受什么条件限制，不堆背景名词，不恢复被记忆策略隐藏的旧事。
+- 角色 sections 写身份、当前目标、说话方式、具体行为倾向和长期互动，不复制世界书或 App 协议。新世界可以创作，人物核心事实和关系硬约束不能改；开场用一件正在发生的小事让 NPC 行动，把玩家的关键回应留给玩家。
 - 如果 outputKind 是 worldBookOnly，character 必须为 null。
 - 如果 outputKind 是 newWorld，character 必须完整；openingMessage 包含可阅读正文、简短 HTML 状态卡、[GAME_STATE] 和 [CHOICES]。
 - 不得补写输入中没有提供的旧世界事实，不得提及“迁徙功能”“被用户带走”“旧 App 世界”。
@@ -14997,15 +15038,14 @@ JSON 格式：
 ''';
 
   static const String _npcMigrationJsonRepairSystemPrompt = '''
-你是 JSON 修复器。根据解析失败的模型输出和目标 schema，只修复 JSON 结构、字段类型与缺失的必填容器。
-不得新增原文没有表达的剧情事实。只输出一个可解析的 JSON 对象，不要 Markdown、解释或注释。
+你修复 JSON 结构。对照目标 schema 修正括号、引号、转义、字段类型和缺失的必填容器，保留原文已有的字段含义、ID、枚举和事实。
+无法从原文恢复的内容用 schema 允许的空值或空容器，不仿照示例编造剧情、关系或记忆；禁止为使文字流畅而改写事实。只输出一个可解析的 JSON 对象，不要 Markdown 围栏、解释或注释。
 ''';
 
   static const String _npcFarewellDraftSystemPrompt = '''
 你是中文文字游戏 App 的“旧世界告别回合”导演。
 
-你的任务不是把 NPC 迁徙到新世界，而是生成“迁徙前最后一场旧世界告别”。
-这场告别必须尊重已有剧情、NPC 印象、羁绊路线和用户与 NPC 的关系。
+写迁徙前最后一场旧世界告别，停留在离开之前。依据已有剧情、NPC 印象和羁绊路线，围绕一个具体的未尽之事展开；场景与对白要让人看出双方在意什么，不预演新世界。
 
 只输出 JSON，不要 Markdown，不要解释。
 
@@ -15028,22 +15068,22 @@ JSON 格式：
 
 要求：
 - 不要替用户做最终决定。
-- 不要把 NPC 写崩。
+- NPC 的话与行动符合现有性格和所知信息。情绪通过具体动作、迟疑或未说完的话呈现，不反复总结不舍，也不临时补出重大共同往事。
 - 不要强行恋爱化，关系类型必须参考羁绊路线。
-- 告别可以温柔、痛苦、克制、仓促或决绝，但必须有可选择余地。
+- 告别可以温柔、痛苦、克制、仓促或决绝，choices 必须给玩家有实质差别的回应余地。continuityFacts 只记此前或本场已经成立的事实，未选中的行动和约定不能提前写入。
 - 所有内容必须是简体中文。
 ''';
 
   static const String _npcMigrationRevisionSystemPrompt = '''
 你是 NPC 迁徙档案重修助手。
 
-用户只要求重修指定部分。
+只改用户指定的部分，沿用输入的事实与适用的记忆边界。
 
 要求：
-- 不要改动未要求改动的事实。
-- 不要推翻源 NPC。
-- 不要改变关系路线，除非用户明确要求。
-- 输出新内容本身，不要解释。
+- 润色时保留事件顺序、关系和不确定性；不得为了让文字完整而补出没有发生的往事、承诺或结果。
+- 人物描述落实为说话和行为特点，不推翻源 NPC。
+- 不改变关系路线，除非用户明确要求；尚未达成的目标仍写成目标。
+- 要求 JSON 的任务只输出目标 schema 的 JSON 对象，保留字段与类型，不加围栏；其他任务只输出指定部分的新正文，不加解释。
 ''';
 
   String _buildNpcMigrationSourceSnapshot({
@@ -15858,7 +15898,7 @@ ${recentTranscript.trim().isEmpty ? '暂无。' : recentTranscript.trim()}
 - 回声必须自然融入当前场景。
 - 只能使用上面这一条前尘片段，不要补充、复述或推断其他旧世界事实。
 - 可以通过梦、物品、台词、场景相似、情绪反应触发。
-- 回声要推进用户和 NPC 的关系，而不是变成设定说明。
+- 用一次具体的辨认、迟疑或熟悉感让 NPC 作出反应，不讲整段旧史，不预设玩家会接受或回应，也不强行确认关系升级。
 - 回复仍必须遵守当前角色输出协议。
 ''';
   }

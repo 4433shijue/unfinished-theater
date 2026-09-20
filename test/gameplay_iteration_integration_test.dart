@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:ai_roleplay_chat/controllers/app_state_controller.dart';
+import 'package:ai_roleplay_chat/data/gameplay_system_prompt.dart';
 import 'package:ai_roleplay_chat/models/app_settings.dart';
 import 'package:ai_roleplay_chat/models/character_profile.dart';
 import 'package:ai_roleplay_chat/models/game_state.dart';
@@ -346,7 +347,7 @@ ${jsonEncode(patch)}
     }
     final system =
         ((payload['messages'] as List).first as Map)['content'].toString();
-    final content = system.contains('玩法系统设计师')
+    final content = system == gameplaySystemGeneratorPrompt
         ? jsonEncode(_system(revised: true).toJson())
         : '{}';
     return http.StreamedResponse(

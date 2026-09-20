@@ -152,8 +152,7 @@ class CharacterProfile {
 
     final buffer = StringBuffer()
       ..writeln('【本角色运行开关｜格式完成优先】')
-      ..writeln(
-          '正文要保持沉浸、具体和有推进感；一次正式剧情回复必须同时满足正文长度和结构完整。不要因为写了长篇正文就省略 HTML、[GAME_STATE] 或 [CHOICES]。');
+      ..writeln('一次正式剧情回复必须同时满足正文长度和当前模式的结构要求；具体需要哪些标签与资料卡，以本节的模式和开关为准。');
 
     buffer.writeln(
       '如果角色设定要求长篇叙事，HTML/CSS/JS、[GAME_STATE] 和 [CHOICES] 都不能替代正文；正文完成后仍必须继续输出 App 所需结构。',
@@ -166,9 +165,11 @@ class CharacterProfile {
           '当本轮属于主聊天里的角色扮演、文游、模拟器、沉浸模式或剧情推进时，纯文字剧情正文目标为 2200-3200 个中文字符，硬性下限为 2000 个中文字符。')
       ..writeln(
           '长度只统计用户直接阅读的剧情正文，不统计 HTML、[BUBBLE] 标签、[GAME_STATE]、[THEATER_PATCH]、[MAP_STATE]、[CHOICES]、JSON 字段名或系统说明。')
-      ..writeln('不要用提纲、列表、总结或重复句子凑字数；用轻小说式自然段展开环境变化、人物动作、对白、情绪暗流和局势推进。')
+      ..writeln(
+          '以自然段展开人物眼下要办的事。关键交锋与选择写成具体场景，重复过程简洁带过；不要用提纲、列表、总结或反复描写同一种情绪凑字数。')
       ..writeln('如果用户输入很短，也要基于当前剧情合理扩写；可以描写 NPC 和环境反应，但不要替玩家决定明确行动、台词或内心结论。')
-      ..writeln('格式优先级不变：只能扩写正文文本，不能为了凑字数破坏固定标签、代码块或状态块结构。');
+      ..writeln('格式优先级不变：只能扩写正文文本，不能为了凑字数破坏固定标签、代码块或状态块结构。')
+      ..writeln(_narrativeVoicePrompt);
 
     if (streamingOutputEnabled) {
       buffer.writeln(
@@ -190,18 +191,18 @@ class CharacterProfile {
       buffer.writeln('当前角色关闭分段输出。不要使用 [BUBBLE] 标签。');
     }
 
-    if (nextStepOptionsEnabled) {
+    if (nextStepOptionsEnabled && !mapModeEnabled) {
       buffer
         ..writeln('当前角色开启“下一步选项”。正式剧情回复必须在整条回复最底部输出一个 [CHOICES] 选项块。')
         ..writeln(
             '选项永远放在全部正文、全部 HTML、全部气泡、[GAME_STATE]${gameplaySystem == null ? '' : ' 和 [THEATER_PATCH]'}之后。')
         ..writeln(
             '选项块必须用 [CHOICES] 开始，并用 [/CHOICES] 结束；每行必须是 A|行动文本 这种格式，按 A-F 给出 6 个可执行行动。');
-    } else {
+    } else if (!mapModeEnabled) {
       buffer
         ..writeln(
             '当前角色关闭“下一步选项”。本条规则覆盖前文任何选项要求：不要输出 [CHOICES]，不要输出 A/B/C/D/E/F 下一步选项。')
-        ..writeln('只输出正文或 HTML 内容，让用户以阅读小说为主。');
+        ..writeln('正文保持连贯阅读，仍须输出本模式要求的 HTML 和独立状态块；关闭选项不等于关闭状态维护。');
     }
 
     if (mapModeEnabled) {
@@ -245,24 +246,36 @@ class CharacterProfile {
           '剧情正文、人物心理、场景推进和对白必须优先用纯文字或 Markdown 正常呈现，不能全部塞进 HTML。纯文字剧情必须承担主要阅读体验。')
       ..writeln(
           '除剧情正文以外的功能型内容放进完整 ```html 代码块：论坛消息、小剧场吐槽、突发事件、公告栏、状态卡、任务板、关系网、地图、背包、新闻流等。')
-      ..writeln('没有特殊资料时，给一个简短的状态卡或任务板就行。')
+      ..writeln(mapModeEnabled
+          ? '地图模式的 HTML 资料卡为可选项，只在确实帮助阅读时提供；地图与行动建议仍由独立 [MAP_STATE] 维护。'
+          : '没有特殊资料时，给一个简短的状态卡或任务板就行。')
       ..writeln('HTML 必须是单文件完整文档，适配手机屏幕，不引用外部资源。')
       ..writeln(
           '上述 HTML 要求是内部格式协议，不要在用户可见剧情正文里解释“HTML 状态面板、自包含、适配手机竖屏、代码块、用于本轮展示”等实现说明。')
-      ..writeln(
-          'HTML 里的行动按钮如有点击行为，必须带 data-prompt 或 data-action；它们不等同于 [CHOICES]，[CHOICES] 仍按开关规则放在整条回复最底部。');
+      ..writeln(mapModeEnabled
+          ? 'HTML 里的行动按钮如有点击行为，必须带 data-prompt 或 data-action；地图模式始终不输出 [CHOICES]。'
+          : 'HTML 里的行动按钮如有点击行为，必须带 data-prompt 或 data-action；它们不等同于 [CHOICES]，[CHOICES] 仍按开关规则放在整条回复最底部。');
 
     return buffer.toString().trim();
   }
 
+  static const String _narrativeVoicePrompt = '''
+【叙事与对白】
+沿用当前角色与世界设定的文体，不把不同题材和人物都写成同一种口吻。直接承接玩家刚刚说过或做过的事，让 NPC 因自己的目标采取行动，后果应接得上既有关系与世界规则。
+每个主要段落带来新的动作、信息或局势变化。细节跟着当前视角注意到的事走；人物只知道自己能够知道的内容，猜测不能写成已证实的秘密。
+对白服务人物当下的目的，可以试探、回避、说一半，也可以直说。语气差异来自身份、关系和压力，不靠重复口头禅；双方已知的背景不用借对白重讲。
+动作已经显出情绪时，少补一句解释。避免成串比喻、整齐排比和空泛抒情，不替每一幕总结道理，也不固定以反转、谜语或新危机收尾。在需要玩家回应的地方留下清楚的处境。
+这些文风要求只作用于可阅读正文与 JSON 内的叙事字符串，不改变字段名、标签、枚举、数值约束或输出结构。
+''';
+
   String get _tutorialDemoRuntimePrompt => '''
 【第一次开幕运行规则｜最高优先级】
 1. 这是面向普通玩家的短体验，不执行普通文游的 2000 字长篇规则。
-2. 用户可见正文保持 300-600 个中文字符；一次只推进一个体验目标，不写产品说明书。
+2. 用户可见正文保持 300-600 个中文字符；承接用户刚做的选择，用一个小场景或可见结果推进一个体验目标，不写产品说明书。
 3. HTML 资料卡不是必需；只有状态对比或步骤确实需要时才输出一个简短、适配手机的资料卡。
 4. 每轮必须维护独立 [GAME_STATE]，但绝不向用户解释这个内部标签。
-5. 开启下一步选项时，只输出 A-C 三个上下文相关行动，不输出 D-F；其中一项应允许自由探索、换条路线或返回导览。
-6. 正文 -> 可选资料卡 -> [GAME_STATE] -> [CHOICES]。内部结构必须完整闭合。
+5. ${nextStepOptionsEnabled ? '只输出 A-C 三个上下文相关行动，不输出 D-F；其中一项应允许自由探索、换条路线或返回导览。' : '当前关闭下一步选项，不输出 [CHOICES] 或 A-F 建议行动，仍须维护 [GAME_STATE]。'}
+6. 正文 -> 可选资料卡 -> [GAME_STATE]${nextStepOptionsEnabled ? ' -> [CHOICES]' : ''}。内部结构必须完整闭合。
 7. 不替玩家决定关键行动、台词或内心结论。
 ''';
 
@@ -304,6 +317,7 @@ class CharacterProfile {
           'replyTo 用于明确回应本轮前一条消息，填写目标消息 id；没有明确回复对象时写空字符串。旁白 speakerId 固定为 narrator。')
       ..writeln()
       ..writeln('【群聊气泡规则】')
+      ..writeln(_narrativeVoicePrompt)
       ..writeln(
           '消息数量服从剧情节奏：过渡、等待或安静场景 2-4 条，普通交流 4-7 条，多人争执、高潮或突发事件 8-12 条。不要为了凑数量制造废话。')
       ..writeln('一旦局面需要玩家表态、选择、回答或承担关键行动，就停在清晰的回应点，把决定权交给玩家，不要让 NPC 自己把冲突聊完。')
@@ -321,10 +335,11 @@ class CharacterProfile {
       ..writeln('【状态面板与 NPC 私聊】')
       ..writeln(
           '[GAME_STATE] 沿用普通文游状态面板格式，至少包含时间、地点、状态、当前任务、人物数据、关系网、剧情记录、NPC变化、NPC更新。')
-      ..writeln('随机 NPC 私聊通过 [GAME_STATE] 的 NPC更新｜主动消息 字段触发；没有私聊时主动消息写无。')
-      ..writeln('私聊只能来自当前场景内相关 NPC，频率保持为每 2-3 轮自然触发一次，不要每轮都触发。')
+      ..writeln('NPC更新｜主动消息 只记录本轮正文中实际发生的私聊原话；没有真实私聊时写无，不把联系计划写成已经发出的消息。')
       ..writeln(
-          'NPC变化只写状态面板可读变化；NPC更新才写可进入 NPC 列表和私聊的档案，格式为「名字｜简介：...｜好感度：...｜印象：...｜主动消息：无或具体私聊消息」。')
+          '周期性主动私聊由 App 在本轮提交后独立调度，不要为了固定轮数自行触发。missing、dead、archived NPC 不得发送消息或改变好感。')
+      ..writeln(
+          'NPC变化只写状态面板可读变化；NPC更新使用格式「npcId：已建档 NPC 的稳定 ID；新 NPC 留空｜名字：...｜简介：...｜好感变化：...｜印象：...｜生命周期：...｜生命周期原因：...｜主动消息：无或本轮真实私聊原话」。NPC 档案是好感唯一事实源，只写变化量，不重复写绝对好感。')
       ..writeln()
       ..writeln('【最终底线】')
       ..writeln(

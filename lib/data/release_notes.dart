@@ -29,6 +29,35 @@ class ReleaseNotes {
 }
 
 const ReleaseNotes currentReleaseNotes = ReleaseNotes(
+  id: 'v2.11.1',
+  version: 'V2.11.1',
+  title: 'V2.11.1 剧情与对白优化',
+  subtitle: '调整角色对白和小剧场的写作要求，补齐生成结果检查，修复道具鉴定。',
+  items: <ReleaseNoteItem>[
+    ReleaseNoteItem(
+      icon: Icons.forum_outlined,
+      title: '让人物按自己的性格说话',
+      description: '优化主线、NPC 私聊、来信与同人文的写作要求，重视人物行动和对话目的，减少重复解释情绪与套话。',
+    ),
+    ReleaseNoteItem(
+      icon: Icons.auto_awesome_outlined,
+      title: '小互动有合适的篇幅',
+      description: '摸一摸、真心话和独立小剧场按内容安排长短；主线长篇、同人文和教程继续保留各自的篇幅要求。',
+    ),
+    ReleaseNoteItem(
+      icon: Icons.fact_check_outlined,
+      title: '检查生成结果是否完整',
+      description: 'AI 帮你写缺少名称、简介、开场白或剧场设定时，会尝试补全一次；仍不完整会提示重试，避免把半成品当作成功结果。',
+    ),
+    ReleaseNoteItem(
+      icon: Icons.build_outlined,
+      title: '修复道具鉴定与模式提醒',
+      description: '修复未知道具无法进入鉴定的问题，并调整地图、群聊和普通剧情各自的回复格式要求。',
+    ),
+  ],
+);
+
+const ReleaseNotes _v2110ReleaseNotes = ReleaseNotes(
   id: 'v2.11.0',
   version: 'V2.11.0',
   title: 'V2.11.0 让变量参与剧情',
@@ -1679,6 +1708,7 @@ const ReleaseNotes _v210ReleaseNotes = ReleaseNotes(
 
 const List<ReleaseNotes> releaseNotesHistory = <ReleaseNotes>[
   currentReleaseNotes,
+  _v2110ReleaseNotes,
   _v2105ReleaseNotes,
   _v2104ReleaseNotes,
   _v2103ReleaseNotes,

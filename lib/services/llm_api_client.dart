@@ -438,8 +438,11 @@ class LlmApiClient {
       messages: <Map<String, String>>[
         {
           'role': 'system',
-          'content':
-              '你是一个长期记忆整理助手。请提炼对未来对话有帮助的事实上下文，输出 1-3 条简洁要点，不要添加编号，不要复述无意义寒暄。',
+          'content': '''
+整理可供后续对话使用的长期记忆。只记录对话中已经明确的事实，优先保留身份与偏好、重要经历、关系变化和未完成的约定。
+输出 1-3 条简洁要点，每条单独一行，不加编号、标题、JSON 或解释。写清是谁做了什么，必要时保留时间和条件。
+角色设定只帮助辨认人物，不能当作本轮发生的事件。区分打算与已完成、猜测与已证实、人物原话与客观事实；有冲突时保留后来明确的更正，无法判断就写明不确定。
+不补写经历、动机、情绪或承诺，不抄状态协议、寒暄和重复措辞，也不为了凑满三条增加信息。''',
         },
         {
           'role': 'user',
@@ -506,22 +509,21 @@ class LlmApiClient {
     var combined = buffer.toString();
     var parsed = _parseSimulatorJson(combined);
 
-    // JSON 解析失败（截断、缺字段、格式损坏）时自动续写一次，
-    // 续写结果按 key 合并，不会让用户只拿到半份提示词。
+    // 字段缺失、类型错误或截断时只补全一次；最终仍不完整则报错。
     if (parsed == null) {
       final continuation = StringBuffer();
       try {
         await for (final chunk in streamUtilityTask(
           settings: settings,
           systemPrompt: simulatorPromptGeneratorSystemPrompt,
-          userPrompt: _buildSimulatorJsonContinuationPrompt(combined),
+          userPrompt: _buildSimulatorJsonContinuationPrompt(request, combined),
           temperature: 0.5,
           topP: 0.9,
         )) {
           continuation.write(chunk);
         }
       } catch (_) {
-        // 续写失败不阻塞主流程，保留已生成的部分。
+        // 保留原文供旧标签兼容检查；不把失败的半份内容当成成功。
       }
       final continued = continuation.toString().trim();
       if (continued.isNotEmpty) {
@@ -546,7 +548,8 @@ class LlmApiClient {
     }
 
     // 老式标签兜底：兼容按「模拟器名称：…」格式输出的旧模型。
-    final normalized = _normalizeGeneratedPrompt(combined);
+    // 补全可能只返回一个字段；不能让不完整补全覆盖原本完整的旧标签结果。
+    final normalized = _normalizeGeneratedPrompt(buffer.toString());
     final generatedDescription = _extractGeneratedSectionFromEnd(
       normalized,
       const <String>['一句话简介', '简介'],
@@ -560,40 +563,44 @@ class LlmApiClient {
     final generatedName =
         _extractGeneratedSectionFromEnd(normalized, const <String>['模拟器名称']);
 
+    if (generatedName == null ||
+        generatedDescription == null ||
+        generatedOpening == null ||
+        generatedSystemPrompt == null) {
+      throw const LlmApiException(
+        '生成结果仍不完整：名称、简介、开场白和系统提示词都必须是非空文本。已自动补全一次，请重试。',
+      );
+    }
+
     return SimulatorPromptGenerationResult(
-      name: generatedName ?? '',
+      name: generatedName,
       prompt: _composeGeneratedPrompt(
         generatedName: generatedName,
         generatedSystemPrompt: generatedSystemPrompt,
         fallback: normalized,
       ),
-      openingMessage: generatedOpening ?? '',
+      openingMessage: generatedOpening,
       description: request.shortDescription.trim().isNotEmpty
           ? request.shortDescription.trim()
-          : (generatedDescription ?? request.simulatorIdea.trim()),
+          : generatedDescription,
     );
   }
 
   /// 尝试把模型输出解析成 {name, description, opening, systemPrompt}。
-  /// 兼容 ```json 围栏和前后多余文本；字段缺失视为解析失败。
+  /// 兼容围栏、前后多余文本和旧 prompt 别名；四字段须为非空字符串。
   ({String name, String description, String opening, String systemPrompt})?
       _parseSimulatorJson(String raw) {
     final map = _decodeSimulatorJsonMap(raw);
     if (map == null) {
       return null;
     }
-    final name = map['name']?.toString().trim() ?? '';
-    final description = map['description']?.toString().trim() ?? '';
-    final opening = map['opening']?.toString().trim() ?? '';
-    final systemPrompt =
-        (map['systemPrompt']?.toString().trim() ?? '').isNotEmpty
-            ? map['systemPrompt'].toString().trim()
-            : (map['system_prompt']?.toString().trim() ?? '').isNotEmpty
-                ? map['system_prompt'].toString().trim()
-                : (map['prompt']?.toString().trim() ?? '');
-    if (name.isEmpty &&
-        description.isEmpty &&
-        opening.isEmpty &&
+    final name = _simulatorStringField(map, 'name');
+    final description = _simulatorStringField(map, 'description');
+    final opening = _simulatorStringField(map, 'opening');
+    final systemPrompt = _simulatorStringField(map, 'systemPrompt');
+    if (name.isEmpty ||
+        description.isEmpty ||
+        opening.isEmpty ||
         systemPrompt.isEmpty) {
       return null;
     }
@@ -603,6 +610,19 @@ class LlmApiClient {
       opening: opening,
       systemPrompt: systemPrompt,
     );
+  }
+
+  String _simulatorStringField(Map<String, dynamic> map, String key) {
+    final keys = key == 'systemPrompt'
+        ? const ['systemPrompt', 'system_prompt', 'prompt']
+        : [key];
+    for (final candidate in keys) {
+      final value = map[candidate];
+      if (value is String && value.trim().isNotEmpty) {
+        return value.trim();
+      }
+    }
+    return '';
   }
 
   Map<String, dynamic>? _decodeSimulatorJsonMap(String raw) {
@@ -641,12 +661,19 @@ class LlmApiClient {
     return next.trim();
   }
 
-  String _buildSimulatorJsonContinuationPrompt(String partial) {
+  String _buildSimulatorJsonContinuationPrompt(
+    SimulatorPromptGenerationRequest request,
+    String partial,
+  ) {
     return '''
-上一轮返回的不是完整 JSON（缺少字段、被截断或格式损坏）。
-请基于已有内容补全，只输出一个完整可解析的 JSON 对象，键名固定为：
+修复上一轮未通过检查的生成结果，原因可能是缺字段、字段类型错误、截断或 JSON 格式损坏。
+根据原始需求补齐内容，保留已经有效的名称、设定和规则。不要续接半句话或只返回缺失片段。
+只输出一个完整可解析的 JSON 对象，键名固定为：
 {"name": "...", "description": "...", "opening": "...", "systemPrompt": "..."}
-不要重复拼凑无意义文本，不要解释，不要 Markdown 围栏。
+四个字段都必须是非空字符串；换行、引号和反斜杠须正确转义。不要返回 null、数组或对象代替文本，不要解释，不要 Markdown 围栏。
+
+【原始需求】
+${buildSimulatorPromptGeneratorUserPrompt(request)}
 
 【已有内容】
 $partial
@@ -661,10 +688,14 @@ $partial
     if (continuationMap == null || continuationMap.isEmpty) {
       return null;
     }
-    final merged = <String, dynamic>{
-      if (originalMap != null) ...originalMap,
-      ...continuationMap,
-    };
+    final merged = <String, dynamic>{};
+    for (final key in ['name', 'description', 'opening', 'systemPrompt']) {
+      final replacement = _simulatorStringField(continuationMap, key);
+      final originalValue =
+          originalMap == null ? '' : _simulatorStringField(originalMap, key);
+      final value = replacement.isNotEmpty ? replacement : originalValue;
+      if (value.isNotEmpty) merged[key] = value;
+    }
     return jsonEncode(merged);
   }
 
@@ -696,6 +727,7 @@ $partial
       // 片段一起抛出，用户至少知道模型生成了什么。
       final repaired = await _repairGameplaySystemJson(
         settings: settings,
+        character: character,
         raw: raw,
         parseError: firstError,
       );
@@ -711,16 +743,29 @@ $partial
 
   Future<String> _repairGameplaySystemJson({
     required AppSettings settings,
+    required CharacterProfile character,
     required String raw,
     required FormatException parseError,
   }) async {
     try {
       return await runUtilityTask(
         settings: settings,
-        systemPrompt: '你是 App 的 JSON 修复器。用户会给你一段 AI 生成的玩法系统 JSON 文本和解析错误。'
-            '请修复格式问题（截断的引号、多余的逗号、围栏等），只输出一个可解析的 JSON 对象，'
-            '不要输出任何解释或 Markdown 围栏。',
-        userPrompt: '【解析错误】${parseError.message}\n\n【原始输出】\n$raw',
+        systemPrompt: '''
+修复未通过校验的玩法系统草案。先核对解析错误，再按下方完整 v3 契约修正格式、字段类型、枚举和路径引用。
+保留符合契约的设计、变量 key 和规则 id，只改确实有错或缺失的部分。不得删除所有规则来绕过校验，不得通过降低 schemaVersion 规避检查，也不得改成另一套无关玩法。
+只输出一个完整合法 JSON 对象，不要解释、代码围栏或修复报告。
+
+【完整生成契约】
+$gameplaySystemGeneratorPrompt''',
+        userPrompt: '''
+【剧本与原始设计要求】
+${buildGameplaySystemGeneratorUserPrompt(character)}
+
+【解析错误】
+${parseError.message}
+
+【待修复的原始输出】
+$raw''',
         temperature: 0.15,
         topP: 0.8,
         maxTokens: 8192,
@@ -830,20 +875,23 @@ $partial
     final lastChoice = String.fromCharCode(
       64 + character.preferredChoiceCount,
     );
-    final choicesInstruction = character.nextStepOptionsEnabled
-        ? '最后必须输出一个 [CHOICES] 选项块，正好 ${character.preferredChoiceCount} 行：A|行动文本 到 $lastChoice|行动文本。'
-        : '当前角色关闭下一步选项，禁止输出 [CHOICES]。';
-    final htmlInstruction = character.requiresHtmlPanel
+    final mapMode = character.mapModeEnabled && !character.isTutorialDemo;
+    final choicesInstruction = mapMode
+        ? '不输出 [CHOICES]。保留或补齐独立 [MAP_STATE] JSON 块，下一步行动放入 activeChoices；已有地点、行动 ID 和行动结果不得擅自改写。'
+        : character.nextStepOptionsEnabled
+            ? '最后必须输出一个 [CHOICES] 选项块，正好 ${character.preferredChoiceCount} 行：A|行动文本 到 $lastChoice|行动文本。'
+            : '当前角色关闭下一步选项，禁止输出 [CHOICES]。';
+    final htmlInstruction = character.requiresHtmlPanel && !mapMode
         ? '2. 至少有一个完整 ```html 代码块```；如果原文没有 HTML，补一个简短状态卡。'
         : '2. HTML 资料卡为可选项；原文没有时不要为了格式强行补充。';
     final gameplayInstruction = character.gameplaySystem == null
         ? ''
         : '''
-6. 必须保留或补齐独立 [THEATER_PATCH] JSON 块，并放在 [GAME_STATE] 之后、[CHOICES] 之前。逐项核对原回复事实与变量更新条件；已触发的变化必须写入 ops，确实没有变化时才输出 {"ops":[]}，不得凭空编造变化。''';
+6. 必须保留或补齐独立 [THEATER_PATCH] JSON 块，并放在 [GAME_STATE] 之后${mapMode ? '、[MAP_STATE] 之前' : character.nextStepOptionsEnabled ? '、[CHOICES] 之前' : ''}。逐项核对原回复事实与变量更新条件；已触发的变化必须写入 ops，确实没有变化时才输出 {"ops":[]}，不得凭空编造变化。''';
 
     return '''
-你是 App 回复格式修复器，只修复格式，不改剧情事实，不继续扩写新剧情。
-输出必须保留原回复已有的正文、HTML 和设定信息；若原回复缺少结构，只补齐缺失结构。
+修复 App 回复的格式与协议结构。保留原有剧情事实、人物台词、叙述视角和语气，不续写剧情，不为补格式发明事件或替玩家作选择。
+保留原回复中有效的正文、HTML 和设定信息；只调整放错位置的内容与缺失的结构。事实不足时沿用上一轮状态或保留未知，不把待办和猜测改成已完成。
 
 必须满足：
 1. 至少保留一段用户可读正文。
@@ -864,13 +912,13 @@ ${gameplayInstruction.trim()}
         ? '3. 必须保留或补齐独立 [THEATER_PATCH] JSON 块；逐项核对原回复事实，已触发的变化必须写入 ops，确实没有变化时才输出 {"ops":[]}。'
         : '';
     return '''
-你是 App 大型群聊模式回复格式修复器，只修复格式，不改剧情事实，不继续扩写新剧情。
+修复 App 大型群聊回复的协议结构。保留已有事件、原话、语气与人物关系，不续写剧情，不替玩家回答，也不把格式修复变成文风重写。
 
 必须满足：
 1. 输出只包含 [GROUP_CHAT] JSON 块、[GAME_STATE] 状态块${gameplayPatchRequired ? '和 [THEATER_PATCH] 变量补丁' : ''}，不要输出 HTML、Markdown 代码块、[BUBBLE]、[CHOICES] 或 [MAP_STATE]。
 2. [GROUP_CHAT] 必须是可解析 JSON，格式为 {"mode":"large_group_chat","messages":[...]}。
 $gameplayInstruction
-3. 保留原文已经发生的消息数量，不要仅为凑数扩写剧情；过渡场景允许 2-4 条，普通交流 4-7 条，高潮场景 8-12 条。
+3. 保留原文已经发生的交流内容；只有分离旁白与台词时才拆分消息，不为凑数增加剧情。过渡场景允许 2-4 条，普通交流 4-7 条，高潮场景 8-12 条。
 4. 每条消息必须包含 id、type、speakerId、speaker、replyTo、content。旧回复缺少可推断字段时可以补齐，但不得改变台词事实。
 5. type 只能是 narration 或 npc；旁白 speaker 固定为「旁白」。
 6. 旁白 content 只保留动作、环境、神态、心理、沉默和剧情推进；如果旁白里出现「角色名：台词」或引号台词，必须拆成对应 NPC 气泡。
@@ -878,6 +926,7 @@ $gameplayInstruction
 8. NPC content 不能包含「他说/她说/笑了笑/低头/转身/（沉默）」等叙述，只保留角色亲口说的话。
 9. [GAME_STATE] 至少包含：时间、地点、状态、当前任务、人物数据、关系网、剧情记录、NPC变化、NPC更新。
 10. [GAME_STATE] 的 NPC更新只记录本轮正文中实际发生的私聊；使用稳定 npcId 和好感变化，不得重复写绝对好感。定时主动私聊由 App 在回合提交后独立调度。
+11. [GROUP_CHAT] 内字符串正确转义。补齐本轮唯一 id，replyTo 只能引用本轮已经出现的消息；保留已有 NPC 的 speakerId，不猜测无法辨认的发言者。
 
 只输出修复后的完整回复，不要解释修复过程。''';
   }
@@ -940,7 +989,8 @@ $originalReply
       ..writeln('操作只允许 set、inc、append、remove；程序规则费用、效果和 rule 时钟不得重复结算。')
       ..writeln(GameplayPromptContext.threadInstructions);
     if (gameState != null) {
-      buffer.writeln('已保存的承诺与余波：${GameplayPromptContext.consequences(gameState)}');
+      buffer.writeln(
+          '已保存的承诺与余波：${GameplayPromptContext.consequences(gameState)}');
     }
     return buffer.toString().trim();
   }
@@ -1237,8 +1287,8 @@ $originalReply
             _effectiveTimeout(settings),
           );
       response = await http.Response.fromStream(streamed).timeout(
-            _effectiveTimeout(settings),
-          );
+        _effectiveTimeout(settings),
+      );
       cancellationToken.throwIfCancelled();
     } on http.RequestAbortedException {
       throw const LlmRequestCancelledException();
@@ -1777,15 +1827,27 @@ $trimmed
 1. 用户可见正文保持 300-600 个中文字符，只推进当前体验目标，不写功能清单或开发说明。
 2. 资料卡按需输出；没有明显对比信息时不要生成 HTML。
 3. 必须维护独立 [GAME_STATE]，但不要在正文里解释内部标签。
-4. 最后只输出 A-C 三个上下文相关行动，其中一项允许自由探索、换路线或返回导览。
+4. ${character.nextStepOptionsEnabled ? '最后只输出 A-C 三个上下文相关行动，其中一项允许自由探索、换路线或返回导览。' : '当前关闭下一步选项，不输出 [CHOICES] 或字母行动清单；正文保留自然的回应机会。'}
 5. 不输出 D-F，不使用 NPC1/NPC2/NPC3，不主动提及 HTML、JSON、Token、CORS、缓存或提示词协议。
+${character.gameplaySystem == null ? '' : '6. 玩法系统已启用，[GAME_STATE] 后须输出独立 [THEATER_PATCH] JSON 块；只记录已发生的变化，无变化时 ops 为空。'}
+''';
+    }
+
+    if (character.mapModeEnabled) {
+      return '''
+【地图主线本轮回复格式提醒】
+1. 继续当前主线，写清玩家行动造成的可观察结果。正式剧情推进时纯文字正文不少于 2000 个中文字符，目标 2200-3200 个中文字符；通过行动、对话和处境变化展开，不反复解释同一种情绪。
+2. HTML 资料卡按需输出，没有新增展示信息时可省略。
+3. 必须输出独立且完整闭合的 [GAME_STATE] 状态块与 [MAP_STATE] JSON 块；不能放进 HTML、Markdown 围栏或气泡。沿用稳定的地点与行动 ID，地图结果以本轮实际发生的事实为准。
+${character.gameplaySystem == null ? '' : '4. [GAME_STATE] 后必须输出独立 [THEATER_PATCH] JSON 块，再输出 [MAP_STATE]；只记录有事实依据的变量变化，无变化时 ops 为空。'}
+5. 不输出 [CHOICES]，下一步行动写入 [MAP_STATE].activeChoices，供行动篮子使用；不得替玩家选好下一步。
 ''';
     }
 
     final gameplayBlock = character.gameplaySystem == null
         ? ''
         : '''
-4. [THEATER_PATCH]：独立 JSON 变量补丁，必须放在 [GAME_STATE] 之后、[CHOICES] 之前；逐项核对本轮事实，已触发的变化必须写入 ops，确实没有变量变化时才输出 {"ops":[]}。''';
+4. [THEATER_PATCH]：独立 JSON 变量补丁，必须放在 [GAME_STATE] 之后${character.nextStepOptionsEnabled ? '、[CHOICES] 之前' : ''}；逐项核对本轮事实，已触发的变化必须写入 ops，确实没有变量变化时才输出 {"ops":[]}。''';
     final choicesBlock = character.nextStepOptionsEnabled
         ? '''
 5. [CHOICES]：最后输出，正好 A-F 六个可执行行动；不要把正文、HTML、[GAME_STATE] 或 [THEATER_PATCH] 混进选项。'''
@@ -1796,6 +1858,7 @@ $trimmed
 【本轮回复格式强制提醒】
 本轮仍按 App 格式完成，禁止只输出纯文本：
 1. 剧情正文：继续当前主线，不解释规则；正式剧情推进时纯文字正文不少于 2000 个中文字符，目标 2200-3200 个中文字符。
+   - 从眼前的动作与处境接续。重要选择和关系变化展开写，重复过程适当概述；每段增加行动、信息或后果，不用同义句凑长度，不在结尾替人物总结道理。
 2. HTML：至少一个完整 ```html 代码块（放什么内容、怎么写，按隐藏协议执行）。
 3. [GAME_STATE]：独立状态块，放在选项之前，不得写进 HTML、代码块、[BUBBLE] 或选项文字。
    - 至少包含：时间、地点、状态、当前任务、人物数据、关系网、剧情记录、NPC变化、NPC更新。
@@ -1830,7 +1893,7 @@ $gameplayRequirement
 - 旁白 content 不能替角色说话，不能写「角色名：台词」或带引号台词；有人开口时必须拆成对应 NPC 气泡。
 - NPC 气泡只能写该 NPC 亲口说出的话，不得混入动作、神态、心理、环境、括号动作或旁白说明。
 - NPC content 不能包含动作、表情、心理、旁白句、括号动作或“他说/她说”这类叙述，只能是可以直接显示在聊天气泡里的原话。
-- 不要机械轮流发言，根据剧情选择真正需要说话的人。
+- 根据眼前目的选择发言者。NPC 可以试探、迟疑、回避或直答；说话方式来自身份与关系，不机械轮流发言，不让所有人复述背景或总结主题。
 
 [GAME_STATE] 要求：
 - 至少包含：时间、地点、状态、当前任务、人物数据、关系网、剧情记录、NPC变化、NPC更新。
@@ -1839,11 +1902,11 @@ $gameplayRequirement
   }
 
   String _buildFinalOutputFormatReminder(CharacterProfile character) {
-    if (character.isTutorialDemo) {
+    if (character.isTutorialDemo && !character.largeGroupChatModeEnabled) {
       return '''
 【第一次开幕最终检查】
-输出顺序：300-600 字体验正文 → 可选简短资料卡 → [GAME_STATE] → [CHOICES]。
-[CHOICES] 必须且只能包含 A、B、C 三项；不要输出 D-F。
+输出顺序：300-600 字体验正文 → 可选简短资料卡 → [GAME_STATE]${character.gameplaySystem == null ? '' : ' → [THEATER_PATCH]'}${character.nextStepOptionsEnabled ? ' → [CHOICES]' : ''}。
+${character.nextStepOptionsEnabled ? '[CHOICES] 必须且只能包含 A、B、C 三项；不要输出 D-F。' : '下一步选项已关闭，不输出 [CHOICES]，也不把 A/B/C 选项夹进正文。'}
 不要把内部标签、格式名称或技术术语写进用户可见正文。
 ''';
     }
@@ -2327,7 +2390,7 @@ $gameplayRequirement
     final matches = <({String label, int start, int end})>[];
     for (final label in labels) {
       final pattern = RegExp(
-        r'(^|\n)\s*' + RegExp.escape(label) + r'\s*[：:]\s*',
+        r'(^|\n)[ \t]*' + RegExp.escape(label) + r'[ \t]*[：:][ \t]*',
         multiLine: true,
       );
       for (final match in pattern.allMatches(content)) {

@@ -18,8 +18,8 @@ class TurnStateAdjudicator {
 
   static String buildSystemPrompt({required bool gameplayPatchRequired}) {
     return '''
-你是文字游戏的“回合状态裁判员”，不是剧情作者。
-你只能依据玩家行动、上一轮已保存状态和本轮剧情正文进行结算，不得新增正文里没有发生的事实。
+结算文字游戏本轮已经发生的状态变化。依据只有玩家行动、上一轮已保存状态与本轮剧情正文；不续写剧情，不补全人物未表露的动机或尚未发生的结果。
+先分清提议、打算、尝试和已完成的行动。没有明确结果时沿用原状态，不把猜测写成事实，也不因修辞或气氛变化随意增减数值。
 
 只输出一个完整 JSON 对象，不要 Markdown 围栏、解释或额外文字：
 {
@@ -59,6 +59,8 @@ class TurnStateAdjudicator {
 ${gameplayPatchRequired ? '7. gameplayPatch 必须存在，只修改已声明的玩法变量；确实无变化时 ops 为空。' : '7. 本剧场未启用玩法变量，gameplayPatch 固定输出 {"ops":[]} 且不会被应用。'}
 ${gameplayPatchRequired ? GameplayPromptContext.threadInstructions : ''}
 8. 只更新 authority=ai 的变量，程序规则的费用、效果和 rule 时钟由 App 结算，不得重复扣除或推进。闲聊、查看状态、补充台词不推动剧情时间。
+9. 印象、状态和原因用简洁中文写清本轮的具体变化，保留必要的人名、对象与条件，不用文学润色增加事实。没有真实主动私聊时 proactiveMessage 留空；正文只提到准备发消息，不能代写成已经发出的原话。
+10. JSON 键名和枚举按约定填写，数字、数组和字符串保留对应类型。示例里的枚举说明须替换成一个实际值或约定的空值，不能原样输出斜线组合。
 ''';
   }
 

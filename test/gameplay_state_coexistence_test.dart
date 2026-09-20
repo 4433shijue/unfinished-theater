@@ -183,7 +183,8 @@ class _SplitProtocolClient extends http.BaseClient {
     final systemPrompt = messages is List && messages.isNotEmpty
         ? (messages.first as Map)['content']?.toString() ?? ''
         : '';
-    if (systemPrompt.contains('回合状态裁判员')) {
+    if (systemPrompt.contains('"gameState"') &&
+        systemPrompt.contains('"gameplayPatch"')) {
       adjudicationCalls += 1;
       final body = jsonEncode(<String, dynamic>{
         'choices': <Map<String, dynamic>>[

@@ -28,6 +28,8 @@ class TurnDirective {
   String toPrompt() {
     final buffer = StringBuffer()
       ..writeln('本轮临时导演指令，只影响这一次回复，不写入长期角色设定。')
+      ..writeln('通过镜头取舍、对白节奏与具体行动体现要求，保留人物原有口吻；'
+          '不直接复述导演指令，不用氛围要求改写既有事实、替玩家作决定或覆盖状态协议。')
       ..writeln('强度：${intensity.clamp(1, 5)}/5');
     if (mood.trim().isNotEmpty) {
       buffer.writeln('氛围：${mood.trim()}');

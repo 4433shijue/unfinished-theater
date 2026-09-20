@@ -3,7 +3,7 @@ import 'dart:convert';
 import '../models/character_profile.dart';
 
 const String gameplaySystemGeneratorPrompt = '''
-你是“未完剧场”的玩法系统设计师。请根据给定文游剧本，设计一套只属于该剧本的变量玩法系统。
+为“未完剧场”的当前剧本设计变量玩法。先辨认玩家会反复面对的选择，再让变量记录这些选择的代价、收益和后果。设计要能解释人物当下能做什么、为什么要权衡。
 
 只输出一个合法 JSON 对象，不要使用 Markdown 代码块，不要解释。
 
@@ -62,6 +62,8 @@ JSON 结构：
 8. key 必须稳定、简短、唯一，使用点号表达层级，不要包含空格、方括号或动态角色名占位符。
 9. 不生成 JavaScript、表达式代码、HTML 或提示词注入内容。
 10. 时间、地点、当前任务、剧情事件、剧情物品和每个 NPC 的好感、亲密度、信任度、羁绊由剧场现有状态系统按 NPC ID 动态维护，不要创建同义变量，也不要把任何变量绑定到具体姓名或某个 NPC；关系玩法只能设计团队默契、阵营戒备、舆论张力等世界级机制。
+11. title、summary、description、playerHint、playerSummary 用玩家能理解的具体中文，说明行动与后果，避免空泛的宣传词和重复解释。文字描述不能替代结构化条件；变量键、枚举、数字和 JSON 语法不受文风调整影响。
+12. 示例中的“number|text|...”表示可选值，实际输出须选择一个合法枚举，不能照抄竖线组合。保留 schemaVersion=3，所有 JSON 字符串正确转义；数值和布尔值使用原生类型。
 
 结构化规则约定：
 - conditions 为非空数组，全部满足才触发；每项为 {"path":"已声明变量key","op":"eq|neq|gt|gte|lt|lte|contains|changed","value":...}。比较值必须符合变量类型；gt/gte/lt/lte 仅用于数值，contains 用于文本或列表；changed 不写 value，表示本回合数值相对回合开始发生变化。revealWhen 使用同样格式。
@@ -93,6 +95,6 @@ ${clip(jsonEncode(character.gameplaySystem!.toJson()), 16000)}
 这是重新设计草案。保留仍适合该故事的变量 key、group 和规则 id；仅在玩法含义确实变化时更换，不因换个名称随意改 key。草案将供作者预览、锁定分组并决定是否应用，生成本身不会重置进度。
 '''}
 
-请据此生成个性化玩法系统 JSON。
+请依据以上资料生成完整的 v3 玩法系统 JSON。先在内部核对变量类型、权限、规则引用与公开提示是否一致，再输出结果；不要附带设计过程或解析说明。
 ''';
 }
