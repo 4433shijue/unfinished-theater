@@ -1016,6 +1016,19 @@ class AppStateController extends ChangeNotifier {
   GameStateSnapshot gameplayStateFor(String characterId) =>
       _gameStateFor(characterId);
 
+  /// Reads a branch without selecting it or writing an opening/settlement.
+  Future<({DialogueHistory history, GameStateSnapshot state})>
+      gameplayHistoryContextFor(String characterId) async {
+    final history = _historyCache[characterId] ??
+        await _store.loadDialogueHistory(characterId);
+    final state =
+        _gameStateCache[characterId] ?? await _store.loadGameState(characterId);
+    return (
+      history: _historyCache.putIfAbsent(characterId, () => history),
+      state: _gameStateCache.putIfAbsent(characterId, () => state),
+    );
+  }
+
   Map<String, dynamic> gameplayValuesFor(String characterId) =>
       Map<String, dynamic>.unmodifiable(
         _gameStateFor(characterId).customVariables,
@@ -6997,6 +7010,7 @@ ${target.content}
                 .migrateRuntime(state.gameplayRuntime),
         gameplayVariableChanges: const <String>[],
         gameplayPlayerVariableChanges: const <String>[],
+        gameplayVariableRecords: const [],
         gameplayVariableWarnings: const <String>[],
       );
       final nextCharacters = _characters
@@ -13351,6 +13365,10 @@ F|做一个意外但仍合理的行动，打破当前僵局。
           patchExpected: false,
         );
       }
+      if (parsed != null &&
+          (!patch.found || !_hasHistoricalGameplayDefinition(message))) {
+        parsed = _withoutGameplayTurnReceipts(parsed);
+      }
       if (parsed == null) {
         continue;
       }
@@ -13812,6 +13830,8 @@ F|做一个意外但仍合理的行动，打破当前僵局。
         content: content,
         patchExpected: gameplayPatchExpected,
       );
+    } else if (parsed != null) {
+      parsed = _withoutGameplayTurnReceipts(parsed);
     }
     if (parsed == null) {
       return;
@@ -13879,6 +13899,7 @@ F|做一个意外但仍合理的行动，打破当前僵局。
         continue;
       }
       final turnSystem = _gameplaySystemAtMessage(message, fallbackSystem);
+      final hasHistoricalDefinition = _hasHistoricalGameplayDefinition(message);
       if (turnSystem != null) {
         state = _gameplayStateForDefinition(state, replaySystem, turnSystem);
         replaySystem = turnSystem;
@@ -13900,6 +13921,11 @@ F|做一个意外但仍合理的行动，打破当前僵局。
           patchExpected: false,
         );
       }
+      if (parsed != null && (!patch.found || !hasHistoricalDefinition)) {
+        // Replay repairs current state, but a present-day fallback rule cannot
+        // establish what the player was allowed to know in an old turn.
+        parsed = _withoutGameplayTurnReceipts(parsed);
+      }
       if (parsed == null) {
         if (message.gameStateSnapshot != null) {
           changed = true;
@@ -13916,7 +13942,8 @@ F|做一个意外但仍合理的行动，打破当前僵局。
           character == null
               ? null
               : _gameplaySystemAtMessage(message, fallbackSystem),
-          baseline: message.gameStateSnapshot?['gameplayBaseline']);
+          baseline: message.gameStateSnapshot?['gameplayBaseline'],
+          historyDefinitionKnown: hasHistoricalDefinition);
       if (jsonEncode(message.gameStateSnapshot) != jsonEncode(snapshot)) {
         changed = true;
       }
@@ -13951,6 +13978,19 @@ F|做一个意外但仍合理的行动，打破当前僵局。
     }
     return parsed.copyWith(updatedAt: message.timestamp);
   }
+
+  bool _hasHistoricalGameplayDefinition(ChatMessage message) =>
+      message.gameStateSnapshot?['gameplayHistoryDefinitionKnown'] != false &&
+      _gameplaySystemAtMessage(message, null) != null;
+
+  GameStateSnapshot _withoutGameplayTurnReceipts(GameStateSnapshot state) =>
+      state.copyWith(
+        gameplayVariableHistoryVersion: 1,
+        gameplayVariableRecords: const [],
+        gameplayVariableChanges: const [],
+        gameplayPlayerVariableChanges: const [],
+        gameplayVariableWarnings: const [],
+      );
 
   GameStateSnapshot _applyGameplayPatchToState({
     required CharacterProfile character,
@@ -13991,6 +14031,10 @@ F|做一个意外但仍合理的行动，打破当前僵局。
           ? state.gameplayRuntime
           : GameplaySystemDraft.preview(current: before, generated: after)
               .migrateRuntime(state.gameplayRuntime),
+      gameplayVariableRecords: const [],
+      gameplayVariableChanges: const [],
+      gameplayPlayerVariableChanges: const [],
+      gameplayVariableWarnings: const [],
     );
   }
 
@@ -13999,6 +14043,7 @@ F|做一个意外但仍合理的行动，打破当前僵局。
     GameplaySystem? system, {
     GameStateSnapshot? previousState,
     dynamic baseline,
+    bool? historyDefinitionKnown,
   }) {
     if (baseline == null && previousState != null && system != null) {
       final messages = _historyFor(state.characterId).messages;
@@ -14020,6 +14065,8 @@ F|做一个意外但仍合理的行动，打破当前僵局。
       ...state.toJson(),
       if (system != null) 'gameplaySystem': system.toJson(),
       if (baseline is Map) 'gameplayBaseline': baseline,
+      if (historyDefinitionKnown == false)
+        'gameplayHistoryDefinitionKnown': false,
     };
   }
 

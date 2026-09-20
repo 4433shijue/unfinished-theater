@@ -1,5 +1,6 @@
 import '../services/npc_message_classifier.dart';
 import 'gameplay_runtime.dart';
+import 'gameplay_variable_change.dart';
 
 class StoryInventoryItem {
   const StoryInventoryItem({
@@ -186,6 +187,8 @@ class GameStateSnapshot {
     this.gameplayVariableChanges = const <String>[],
     this.gameplayPlayerVariableChanges = const <String>[],
     this.gameplayVariableWarnings = const <String>[],
+    this.gameplayVariableHistoryVersion = 0,
+    this.gameplayVariableRecords = const <GameplayVariableChange>[],
     this.gameplayRuntime = const GameplayRuntimeState(),
   });
 
@@ -232,6 +235,16 @@ class GameStateSnapshot {
           _readStringList(json['gameplayPlayerVariableChanges']),
       gameplayVariableWarnings:
           _readStringList(json['gameplayVariableWarnings']),
+      gameplayVariableHistoryVersion: int.tryParse(
+              json['gameplayVariableHistoryVersion']?.toString() ?? '') ??
+          0,
+      gameplayVariableRecords: (json['gameplayVariableRecords'] is List
+              ? json['gameplayVariableRecords'] as List
+              : const [])
+          .whereType<Map>()
+          .map((item) =>
+              GameplayVariableChange.fromJson(Map<String, dynamic>.from(item)))
+          .toList(growable: false),
       gameplayRuntime: json['gameplayRuntime'] is Map
           ? GameplayRuntimeState.fromJson(
               Map<String, dynamic>.from(json['gameplayRuntime'] as Map))
@@ -262,6 +275,8 @@ class GameStateSnapshot {
   final List<String> gameplayVariableChanges;
   final List<String> gameplayPlayerVariableChanges;
   final List<String> gameplayVariableWarnings;
+  final int gameplayVariableHistoryVersion;
+  final List<GameplayVariableChange> gameplayVariableRecords;
   final GameplayRuntimeState gameplayRuntime;
 
   bool get hasNarrativeState {
@@ -313,6 +328,8 @@ class GameStateSnapshot {
     List<String>? gameplayVariableChanges,
     List<String>? gameplayPlayerVariableChanges,
     List<String>? gameplayVariableWarnings,
+    int? gameplayVariableHistoryVersion,
+    List<GameplayVariableChange>? gameplayVariableRecords,
     GameplayRuntimeState? gameplayRuntime,
   }) {
     return GameStateSnapshot(
@@ -343,6 +360,10 @@ class GameStateSnapshot {
           gameplayPlayerVariableChanges ?? this.gameplayPlayerVariableChanges,
       gameplayVariableWarnings:
           gameplayVariableWarnings ?? this.gameplayVariableWarnings,
+      gameplayVariableHistoryVersion:
+          gameplayVariableHistoryVersion ?? this.gameplayVariableHistoryVersion,
+      gameplayVariableRecords:
+          gameplayVariableRecords ?? this.gameplayVariableRecords,
       gameplayRuntime: gameplayRuntime ?? this.gameplayRuntime,
     );
   }
@@ -376,6 +397,11 @@ class GameStateSnapshot {
         'gameplayPlayerVariableChanges': gameplayPlayerVariableChanges,
       if (gameplayVariableWarnings.isNotEmpty)
         'gameplayVariableWarnings': gameplayVariableWarnings,
+      if (gameplayVariableHistoryVersion > 0)
+        'gameplayVariableHistoryVersion': gameplayVariableHistoryVersion,
+      if (gameplayVariableRecords.isNotEmpty)
+        'gameplayVariableRecords':
+            gameplayVariableRecords.map((item) => item.toJson()).toList(),
       if (!gameplayRuntime.isEmpty) 'gameplayRuntime': gameplayRuntime.toJson(),
     };
   }

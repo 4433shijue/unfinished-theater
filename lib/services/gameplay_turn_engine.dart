@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../models/game_state.dart';
 import '../models/gameplay_runtime.dart';
 import '../models/gameplay_system.dart';
+import '../models/gameplay_variable_change.dart';
 import 'gameplay_patch_engine.dart';
 
 /// Settles one accepted narrative turn. Conditions observe one frozen snapshot,
@@ -36,6 +37,9 @@ class GameplayTurnEngine {
         gameplayPlayerVariableChanges:
             previousState.gameplayPlayerVariableChanges,
         gameplayVariableWarnings: previousState.gameplayVariableWarnings,
+        gameplayVariableHistoryVersion:
+            previousState.gameplayVariableHistoryVersion,
+        gameplayVariableRecords: previousState.gameplayVariableRecords,
       );
     }
     final parsed = GameplayPatchParser.parseResult(content);
@@ -47,6 +51,8 @@ class GameplayTurnEngine {
         gameplayRuntime: runtime,
         gameplayVariableChanges: const [],
         gameplayPlayerVariableChanges: const [],
+        gameplayVariableHistoryVersion: 1,
+        gameplayVariableRecords: const [],
         gameplayVariableWarnings: [
           if (parsed.error != null)
             parsed.error!
@@ -63,6 +69,21 @@ class GameplayTurnEngine {
       operations: parsed.operations,
     );
     var values = ai.values;
+    final receiptSteps = <String, List<GameplayVariableChangeStep>>{};
+    final aiReceiptValues = Map<String, dynamic>.from(initial);
+    for (final change in ai.changes) {
+      final beforeValues = Map<String, dynamic>.from(aiReceiptValues);
+      aiReceiptValues[change.path] = change.after;
+      _recordVariableStep(
+        system: system,
+        receipts: receiptSteps,
+        path: change.path,
+        beforeValues: beforeValues,
+        afterValues: aiReceiptValues,
+        source: 'ai',
+        reason: change.reason,
+      );
+    }
     final warnings = <String>[...ai.rejections];
     final reasons = <String, String>{
       for (final change in ai.changes) change.path: change.reason
@@ -90,8 +111,18 @@ class GameplayTurnEngine {
         }
         final current = _number(values[variable.key]);
         if (current == null || !(current + advance).isFinite) continue;
+        final beforeValues = Map<String, dynamic>.from(values);
         values[variable.key] = variable.normalizeValue(current + advance);
         reasons[variable.key] = '剧情时间推进';
+        _recordVariableStep(
+          system: system,
+          receipts: receiptSteps,
+          path: variable.key,
+          beforeValues: beforeValues,
+          afterValues: values,
+          source: 'time',
+          reason: '剧情时间推进',
+        );
       }
     }
 
@@ -127,6 +158,7 @@ class GameplayTurnEngine {
         continue;
       }
       final candidate = Map<String, dynamic>.from(values);
+      final candidateReceipts = <String, List<GameplayVariableChangeStep>>{};
       var candidateThreads = <GameplayStoryThread>[...threads];
       final threadChanges = <GameplayStoryThread>[];
       String? failure;
@@ -145,12 +177,39 @@ class GameplayTurnEngine {
           failure = '代价不足或费用定义无效（${cost.path}）';
           break;
         }
+        final beforeValues = Map<String, dynamic>.from(candidate);
         candidate[cost.path] = variable.normalizeValue(available - cost.amount);
+        _recordVariableStep(
+          system: system,
+          receipts: candidateReceipts,
+          path: cost.path,
+          beforeValues: beforeValues,
+          afterValues: candidate,
+          source: 'rule',
+          reason: '${rule.title} · 消耗（${rule.effect}）',
+          playerReason: rule.playerSummary.isEmpty
+              ? '行动消耗'
+              : '${rule.playerSummary}（行动消耗）',
+          rule: rule,
+        );
       }
       if (failure == null) {
         for (final effect in rule.effects) {
+          final beforeValues = Map<String, dynamic>.from(candidate);
           failure = _applyEffect(system, candidate, effect);
           if (failure != null) break;
+          _recordVariableStep(
+            system: system,
+            receipts: candidateReceipts,
+            path: effect.path,
+            beforeValues: beforeValues,
+            afterValues: candidate,
+            source: 'rule',
+            reason: '${rule.title} · ${rule.effect}',
+            playerReason:
+                rule.playerSummary.isEmpty ? '行动结果' : rule.playerSummary,
+            rule: rule,
+          );
         }
       }
       if (failure == null) {
@@ -181,6 +240,9 @@ class GameplayTurnEngine {
         warnings.add('${rule.title}：$failure，整条规则未执行');
         continue;
       }
+      for (final entry in candidateReceipts.entries) {
+        receiptSteps.putIfAbsent(entry.key, () => []).addAll(entry.value);
+      }
       for (final key in candidate.keys) {
         if (!_equal(values[key], candidate[key])) {
           reasons[key] = _public(rule.visibility) ? rule.playerSummary : '';
@@ -210,9 +272,34 @@ class GameplayTurnEngine {
 
     final variableChanges = <String>[];
     final playerVariableChanges = <String>[];
+    final variableRecords = <GameplayVariableChange>[];
     for (final variable in system.variables) {
       final before = initial[variable.key];
       final after = values[variable.key];
+      final steps = receiptSteps[variable.key] ?? const [];
+      if (steps.isNotEmpty) {
+        final beforeVisible =
+            _playerVariableVisible(variable, initial, initial);
+        final afterVisible = _playerVariableVisible(variable, values, initial);
+        variableRecords.add(GameplayVariableChange(
+          turnId: identity,
+          turn: turn,
+          path: variable.key,
+          type: variable.type,
+          label: variable.label,
+          visibility: variable.visibility,
+          before: copyGameplayHistoryValue(before),
+          after: copyGameplayHistoryValue(after),
+          steps: List.unmodifiable(steps),
+          playerVisible: beforeVisible || afterVisible,
+          playerBefore: beforeVisible
+              ? variable.displayValue(before, reveal: false)
+              : '当时未公开',
+          playerAfter: afterVisible
+              ? variable.displayValue(after, reveal: false)
+              : '当时未公开',
+        ));
+      }
       if (_equal(before, after)) continue;
       final reason = reasons[variable.key] ?? '';
       final suffix = reason.isEmpty ? '' : '（$reason）';
@@ -225,11 +312,19 @@ class GameplayTurnEngine {
               previousValues: initial)) {
         continue;
       }
-      final playerBefore = variable.displayValue(before, reveal: false);
+      final playerBefore = _playerVariableVisible(variable, initial, initial)
+          ? variable.displayValue(before, reveal: false)
+          : '当时未公开';
       final playerAfter = variable.displayValue(after, reveal: false);
       if (playerBefore == playerAfter) continue;
+      final playerReasons = steps
+          .where((step) => step.playerVisible && step.playerReason.isNotEmpty)
+          .map((step) => step.playerReason)
+          .toSet();
+      final playerSuffix =
+          playerReasons.isEmpty ? '' : '（${playerReasons.join('；')}）';
       playerVariableChanges
-          .add('${variable.label}：$playerBefore → $playerAfter$suffix');
+          .add('${variable.label}：$playerBefore → $playerAfter$playerSuffix');
     }
     final changed = variableChanges.isNotEmpty || changes.isNotEmpty;
     return narrativeState.copyWith(
@@ -243,6 +338,8 @@ class GameplayTurnEngine {
         ...playerChanges
       ],
       gameplayVariableWarnings: warnings.take(48).toList(),
+      gameplayVariableHistoryVersion: 1,
+      gameplayVariableRecords: variableRecords,
       gameplayRuntime: GameplayRuntimeState(
         turn: turn,
         lastTurnId: identity,
@@ -252,6 +349,82 @@ class GameplayTurnEngine {
             events.length > 80 ? events.sublist(events.length - 80) : events,
       ),
     );
+  }
+
+  static void _recordVariableStep({
+    required GameplaySystem system,
+    required Map<String, List<GameplayVariableChangeStep>> receipts,
+    required String path,
+    required Map<String, dynamic> beforeValues,
+    required Map<String, dynamic> afterValues,
+    required String source,
+    required String reason,
+    String? playerReason,
+    GameplayRuleDefinition? rule,
+  }) {
+    final variable = system.variableFor(path);
+    if (variable == null || _equal(beforeValues[path], afterValues[path])) {
+      return;
+    }
+    final beforeVisible =
+        _playerVariableVisible(variable, beforeValues, beforeValues);
+    final afterVisible =
+        _playerVariableVisible(variable, afterValues, beforeValues);
+    final beforeText = beforeVisible
+        ? variable.displayValue(beforeValues[path], reveal: false)
+        : '当时未公开';
+    final afterText = afterVisible
+        ? variable.displayValue(afterValues[path], reveal: false)
+        : '当时未公开';
+    final playerVisible = (beforeVisible || afterVisible) &&
+        (rule == null || _public(rule.visibility)) &&
+        (variable.visibility != GameplayVariableVisibility.fuzzy ||
+            beforeText != afterText);
+    var safeReason = playerReason ?? reason;
+    if (variable.visibility == GameplayVariableVisibility.fuzzy) {
+      safeReason = source == 'time' ? '剧情时间推进，已知阶段变化' : '剧情推进，已知阶段变化';
+    } else if (_mentionsPrivateDefinition(
+        system, safeReason, beforeValues, afterValues)) {
+      safeReason = source == 'time' ? '剧情时间推进' : '剧情中的行动与结果使状态变化';
+    }
+    receipts.putIfAbsent(path, () => []).add(GameplayVariableChangeStep(
+          source: source,
+          before: copyGameplayHistoryValue(beforeValues[path]),
+          after: copyGameplayHistoryValue(afterValues[path]),
+          reason: reason,
+          ruleId: rule?.id ?? '',
+          playerVisible: playerVisible,
+          playerBefore: playerVisible ? beforeText : '',
+          playerAfter: playerVisible ? afterText : '',
+          playerReason: playerVisible ? safeReason : '',
+        ));
+  }
+
+  static bool _playerVariableVisible(GameplayVariableDefinition variable,
+          Map<String, dynamic> values, Map<String, dynamic> previousValues) =>
+      variable.isPlayerFacing &&
+      matches(
+          conditions: variable.revealWhen,
+          values: values,
+          previousValues: previousValues);
+
+  static bool _mentionsPrivateDefinition(GameplaySystem system, String reason,
+      Map<String, dynamic> beforeValues, Map<String, dynamic> afterValues) {
+    for (final variable in system.variables) {
+      if (variable.visibility == GameplayVariableVisibility.public &&
+          _playerVariableVisible(variable, beforeValues, beforeValues) &&
+          _playerVariableVisible(variable, afterValues, beforeValues)) {
+        continue;
+      }
+      if ((variable.key.isNotEmpty && reason.contains(variable.key)) ||
+          (variable.label.isNotEmpty && reason.contains(variable.label))) {
+        return true;
+      }
+    }
+    return system.rules.any((rule) =>
+        !_public(rule.visibility) &&
+        ((rule.title.isNotEmpty && reason.contains(rule.title)) ||
+            (rule.id.isNotEmpty && reason.contains(rule.id))));
   }
 
   /// Used by both runtime settlement and local author previews. No expression

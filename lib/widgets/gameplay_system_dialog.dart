@@ -8,6 +8,7 @@ import '../models/character_profile.dart';
 import '../models/gameplay_system.dart';
 import 'gameplay_author_dialog.dart';
 import 'gameplay_system_readout.dart';
+import 'gameplay_history_dialog.dart';
 
 class GameplaySystemDialog extends StatefulWidget {
   const GameplaySystemDialog({super.key, required this.characterId});
@@ -21,7 +22,30 @@ class _GameplaySystemDialogState extends State<GameplaySystemDialog> {
   bool _backstage = false;
   bool _spoilersAccepted = false;
   bool _busy = false;
+  bool _loadingState = true;
+  bool _startedLoading = false;
   String? _error;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_startedLoading) {
+      _startedLoading = true;
+      _loadState();
+    }
+  }
+
+  Future<void> _loadState() async {
+    try {
+      await context
+          .read<AppStateController>()
+          .gameplayHistoryContextFor(widget.characterId);
+    } catch (error) {
+      if (mounted) _error = '读取玩法状态失败：$error';
+    } finally {
+      if (mounted) setState(() => _loadingState = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -104,14 +128,20 @@ class _GameplaySystemDialogState extends State<GameplaySystemDialog> {
                       ),
                       const SizedBox(height: 16),
                       Expanded(
-                        child: SingleChildScrollView(
-                          child: GameplaySystemReadout(
-                            system: system,
-                            state:
-                                controller.gameplayStateFor(widget.characterId),
-                            backstage: _backstage,
-                          ),
-                        ),
+                        child: _loadingState
+                            ? const Center(child: CircularProgressIndicator())
+                            : SingleChildScrollView(
+                                child: GameplaySystemReadout(
+                                  system: system,
+                                  state: controller
+                                      .gameplayStateFor(widget.characterId),
+                                  backstage: _backstage,
+                                  onVariableTap: _busy
+                                      ? null
+                                      : (variable) =>
+                                          _openHistory(system, variable),
+                                ),
+                              ),
                       ),
                     ],
                   ],
@@ -146,6 +176,32 @@ class _GameplaySystemDialogState extends State<GameplaySystemDialog> {
         ],
       ),
     );
+  }
+
+  Future<void> _openHistory(
+      GameplaySystem system, GameplayVariableDefinition variable) async {
+    final controller = context.read<AppStateController>();
+    setState(() => _busy = true);
+    try {
+      final data =
+          await controller.gameplayHistoryContextFor(widget.characterId);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (_) => GameplayHistoryDialog(
+          system: system,
+          state: data.state,
+          messages: data.history.messages,
+          path: variable.key,
+          storyName: controller.characterNameFor(widget.characterId),
+          backstage: _backstage,
+        ),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = '读取变化记录失败：$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<bool> _acceptSpoilers() async {

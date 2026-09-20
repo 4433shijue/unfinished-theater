@@ -1,0 +1,14 @@
+{
+  "schemaVersion":3,"title":"潮汐通信","summary":"管理旧城通信","coreLoop":"检查信号，选择时机，消耗电量发送消息。",
+  "variables":[
+    {"key":"radio.signal","label":"信号","group":"电台","type":"number","visibility":"public","authority":"ai","initialValue":20,"description":"天线接收情况","min":0,"max":100,"maxDelta":8,"playerHint":"调整天线观察信号。"},
+    {"key":"radio.battery","label":"电量","group":"电台","type":"number","visibility":"public","authority":"rule","initialValue":60,"description":"程序结算设备耗电","min":0,"max":100,"maxDelta":10,"playerHint":"发送信息消耗电量。"},
+    {"key":"radio.alert","label":"戒备","group":"旧城","type":"number","visibility":"fuzzy","authority":"ai","initialValue":35,"description":"巡逻队警觉程度","min":0,"max":100,"maxDelta":8,"stages":[{"min":0,"label":"平静"},{"min":30,"label":"留意"},{"min":70,"label":"追查"}],"playerHint":"注意巡逻动向。"},
+    {"key":"radio.secret","label":"暗潮代号7391","group":"幕后","type":"text","visibility":"director","authority":"ai","initialValue":"暗潮代号7391","description":"幕后线索，不可向玩家直接泄漏。"},
+    {"key":"radio.engine_code","label":"内部校验码","group":"引擎","type":"text","visibility":"engine","authority":"rule","initialValue":"ENGINE_ONLY_5826","description":"不应注入模型。"}
+  ],
+  "rules":[
+    {"id":"send_signal","title":"发出信号","when":"信号达到80时","effect":"扣除电量","visibility":"public","conditions":[{"path":"radio.signal","op":"gte","value":80}],"costs":[{"path":"radio.battery","amount":2}],"effects":[{"path":"radio.signal","op":"inc","value":-5}],"once":false,"playerSummary":"电台发出信号。"},
+    {"id":"warning","title":"巡逻收紧","when":"戒备达到70时","effect":"信号受干扰","visibility":"public","conditions":[{"path":"radio.alert","op":"gte","value":70}],"effects":[{"path":"radio.signal","op":"inc","value":-3}],"once":true,"playerSummary":"巡逻加强，信号受到干扰。"}
+  ]
+}

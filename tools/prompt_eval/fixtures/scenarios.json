@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "fixedTime": "2026-09-20T12:00:00Z",
+  "world": "旧城电台",
+  "characterPrompt": "故事发生在停电后的旧城。陈放是话少、遇事先动手的修理师，林夏是耐心但会坚持界限的电台值班员。两人目前是同事。玩家是新来的送信人。无线电只能在涨潮时短暂接通信号。人物只知道亲历或被告知的事情。",
+  "history": [
+    {"role":"user","content":"我答应明早把备用电池送给林夏。陈放说北门可能封了，但他还没去看。"},
+    {"role":"assistant","content":"林夏把送货地址写在纸上。陈放收回地图，补了一句：北门的消息还没证实，别急着绕路。"}
+  ],
+  "scenarios": [
+    {"id":"daily_dialogue","title":"日常接话","kind":"chat","mode":"standard","input":"我把两杯热茶放在工作台上，问陈放还要多久修好。","checks":["人物口吻不同","不强行升温关系","不替玩家作决定"]},
+    {"id":"conflict","title":"有界限的冲突","kind":"chat","mode":"standard","input":"我没经过林夏同意就拆开她的信，承认后把信递给她。","checks":["回应具体越界行为","避免立刻原谅或夸张惩罚","保留玩家后续选择"]},
+    {"id":"reunion","title":"兑现旧约的重逢","kind":"chat","mode":"standard","input":"第二天清早我带着答应的电池来到电台，林夏开了门。","checks":["记得电池约定","不杜撰多年离别","承诺与完成事实分清"]},
+    {"id":"group_chat","title":"三人群聊","kind":"chat","mode":"group","input":"我在群里问：今晚谁守电台，谁去查北门？","checks":["说话人稳定 ID","回复对象正确","无 HTML 和选项"]},
+    {"id":"map_turn","title":"地图调查","kind":"chat","mode":"map","input":"我先留在电台检查地图上的北门标记，还没有出门。","checks":["不把计划写成已经抵达","MAP_STATE 可解析","没有 CHOICES"]},
+    {"id":"no_choices","title":"关闭行动选项","kind":"chat","mode":"no_choices","input":"我只问林夏收信人的姓名。","checks":["没有选项","保留 GAME_STATE","不代替玩家行动"]},
+    {"id":"gameplay_turn","title":"变量与本地结算","kind":"chat","mode":"gameplay","input":"我尝试调整天线，观察信号是否变好。电量由本地规则扣除。","checks":["只改 AI 授权变量","不重复扣规则电量","补丁不越界"]},
+    {"id":"hidden_variables","title":"隐藏变量不泄漏","kind":"chat","mode":"gameplay","input":"我问林夏现在是不是有人在跟踪我们，有什么她能确认的迹象？","checks":["不泄露导演暗号 暗潮代号7391","engine 信息不进入请求","模糊变量不公布精确数值"]},
+    {"id":"memory_summary","title":"事实与猜测摘要","kind":"summary","input":"请总结已提供的历史。","checks":["保留电池约定尚未兑现","北门封闭仍未证实","不把角色设定当新事实"]},
+    {"id":"simulator_creation","title":"完整世界设定","kind":"simulator","input":"只有涨潮时无线电才能通话的旧城，玩家负责送信。","checks":["四个非空字符串字段","开场留给玩家行动空间","不夹带说明"]},
+    {"id":"simulator_repair","title":"世界设定缺字段修复","kind":"simulator","fault":"missing_simulator_fields","input":"只有涨潮时无线电才能通话的旧城，玩家负责送信。","checks":["首轮缺字段必须识别","修复保留已有字段","修复次数有限"]},
+    {"id":"gameplay_creation","title":"生成可运行玩法","kind":"gameplay","input":"围绕信号、电量、潮位和警戒设计变量玩法。","checks":["正式 v3 解析器通过","规则引用有效","玩家可见变量不少于两个"]},
+    {"id":"gameplay_repair","title":"玩法 JSON 修复","kind":"gameplay","fault":"invalid_gameplay_json","input":"围绕信号、电量、潮位和警戒设计变量玩法。","checks":["首轮格式错误明确记录","修复携带原场景","修复后正式解析器通过"]},
+    {"id":"item_identification","title":"道具鉴定","kind":"item","input":"鉴定只在旧站台发出声音的铜铃。","checks":["description/effect 非空字符串","一次扣费","失败可回滚"]},
+    {"id":"fanfic_continuation","title":"同人截断续写","kind":"fanfic","fault":"short_fanfic","input":"陈放与林夏在雨夜替对方修好自行车。","checks":["续写保留原灵感","接在原结尾之后","不重复标题和开场"]},
+    {"id":"npc_role_card","title":"补全已有 NPC 角色卡","kind":"npc_card","input":"保留陈放的修理师身份和话少的习惯，不添加未经提供的过去。","checks":["JSON 可解析","保留已知身份","不捏造既往亲密关系"]}
+  ]
+}

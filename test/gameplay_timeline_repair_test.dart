@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:ai_roleplay_chat/controllers/app_state_controller.dart';
 import 'package:ai_roleplay_chat/models/app_settings.dart';
 import 'package:ai_roleplay_chat/models/character_profile.dart';
+import 'package:ai_roleplay_chat/models/chat_message.dart';
 import 'package:ai_roleplay_chat/models/game_state.dart';
 import 'package:ai_roleplay_chat/models/gameplay_runtime.dart';
 import 'package:ai_roleplay_chat/models/gameplay_system.dart';
@@ -143,6 +144,54 @@ void main() {
         contains('[THEATER_PATCH]'));
     expect(controller.currentHistory.messages[1].content,
         contains('[GAME_STATE]'));
+  });
+
+  test('replaying a response without a patch never inherits previous receipts',
+      () async {
+    final client = _Client();
+    final controller = await _controller(client);
+    await _twoTurns(controller);
+    final target = controller.currentHistory.messages.last;
+    final beforeRecords =
+        (target.gameStateSnapshot!['gameplayVariableRecords'] as List?) ?? [];
+    expect(beforeRecords, isNotEmpty);
+    client.replies.add(_replyWithoutPatch());
+
+    expect(await controller.regenerateAssistantMessage(target.id), isNull);
+    final repaired = controller.currentHistory.messages.last;
+    expect(
+        (repaired.gameStateSnapshot!['gameplayVariableRecords'] as List?) ?? [],
+        isEmpty);
+    expect(
+        (repaired.gameStateSnapshot!['gameplayVariableChanges'] as List?) ?? [],
+        isEmpty);
+    expect(controller.currentGameState.gameplayVariableRecords, isEmpty);
+  });
+
+  test(
+      'deleting and branching rebuilds history receipts only from retained branch',
+      () async {
+    final client = _Client();
+    final controller = await _controller(client);
+    await _twoTurns(controller);
+    final first = controller.currentHistory.messages[1];
+    final second = controller.currentHistory.messages.last;
+    expect(first.gameStateSnapshot!['gameplayVariableRecords'], isNotEmpty);
+    expect(second.gameStateSnapshot!['gameplayVariableRecords'], isNotEmpty);
+
+    await controller.deleteMessage(second.id);
+    expect(
+        controller.currentHistory.messages
+            .where((message) => message.role == ChatRole.assistant)
+            .map((message) => message.id),
+        [first.id]);
+    expect(controller.currentGameState.gameplayVariableRecords, isNotEmpty);
+    expect(controller.currentGameState.customVariables['调查.进展'], 3);
+
+    await controller.createStoryBranchFromMessage(
+        messageId: first.id, branchName: '回到港口');
+    expect(controller.currentGameState.gameplayVariableRecords, isNotEmpty);
+    expect(controller.currentHistory.messages.last.id, first.id);
   });
 
   test('a generated display panel cannot replay a copied gameplay protocol',
@@ -326,6 +375,21 @@ ${jsonEncode({
           ]
         })}
 [/THEATER_PATCH]
+''';
+
+String _replyWithoutPatch() => '''
+本轮暂时没有新的变量变化。
+[GAME_STATE]
+时间：夜晚
+地点：港口
+状态：警觉
+当前任务：调查港口
+人物数据：你保持清醒
+关系网：暂无变化
+剧情记录：等待下一步
+NPC变化：无
+NPC更新：无
+[/GAME_STATE]
 ''';
 
 class _Client extends http.BaseClient {

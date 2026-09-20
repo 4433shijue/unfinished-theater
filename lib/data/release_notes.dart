@@ -29,6 +29,30 @@ class ReleaseNotes {
 }
 
 const ReleaseNotes currentReleaseNotes = ReleaseNotes(
+  id: 'v2.12.0',
+  version: 'V2.12.0',
+  title: 'V2.12.0 看懂变化，编写规则',
+  subtitle: '从变量变化回看剧情，用表单编写玩法，在预演中检查实际后果。',
+  items: <ReleaseNoteItem>[
+    ReleaseNoteItem(
+      icon: Icons.history,
+      title: '每个变量都有变化记录',
+      description: '点击玩法面板中的变量，查看当前分支的变化过程与对应剧情；模糊状态按当时能知道的阶段展示。',
+    ),
+    ReleaseNoteItem(
+      icon: Icons.edit_note,
+      title: '用表单编写执行规则',
+      description: '选择条件、代价、效果与触发频率，把设计保存到草稿；文字叙事规则和自动结算规则有清楚的区别。',
+    ),
+    ReleaseNoteItem(
+      icon: Icons.fact_check_outlined,
+      title: '预演能看清触发结果',
+      description: '检查条件、资源和冷却对规则的影响，在独立进度中观察结算，确认后再应用到剧场。',
+    ),
+  ],
+);
+
+const ReleaseNotes _v2111ReleaseNotes = ReleaseNotes(
   id: 'v2.11.1',
   version: 'V2.11.1',
   title: 'V2.11.1 剧情与对白优化',
@@ -1708,6 +1732,7 @@ const ReleaseNotes _v210ReleaseNotes = ReleaseNotes(
 
 const List<ReleaseNotes> releaseNotesHistory = <ReleaseNotes>[
   currentReleaseNotes,
+  _v2111ReleaseNotes,
   _v2110ReleaseNotes,
   _v2105ReleaseNotes,
   _v2104ReleaseNotes,

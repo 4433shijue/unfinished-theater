@@ -180,7 +180,16 @@ class _GameplayAuthorDialogState extends State<GameplayAuthorDialog> {
                             ? null
                             : () async {
                                 final edited =
-                                    await editGameplayRule(context, rule);
+                                    await editGameplayRule(context, rule,
+                                        system: effective,
+                                        state: widget.state.copyWith(
+                                          customVariables:
+                                              _review.migrateValues(
+                                                  widget.state.customVariables),
+                                          gameplayRuntime:
+                                              _review.migrateRuntime(
+                                                  widget.state.gameplayRuntime),
+                                        ));
                                 if (edited == null || !mounted) return;
                                 _update({
                                   ..._working.toJson(),
@@ -274,6 +283,7 @@ class _GameplayAuthorDialogState extends State<GameplayAuthorDialog> {
         context: context,
         builder: (_) => GameplayRehearsalDialog(
           system: _review.system,
+          authorDiagnostics: true,
           state: widget.state.copyWith(
               customVariables:
                   _review.migrateValues(widget.state.customVariables),

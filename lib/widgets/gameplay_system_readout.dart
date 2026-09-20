@@ -11,11 +11,13 @@ class GameplaySystemReadout extends StatelessWidget {
     required this.system,
     required this.state,
     this.backstage = false,
+    this.onVariableTap,
   });
 
   final GameplaySystem system;
   final GameStateSnapshot state;
   final bool backstage;
+  final ValueChanged<GameplayVariableDefinition>? onVariableTap;
 
   @override
   Widget build(BuildContext context) {
@@ -68,6 +70,7 @@ class GameplaySystemReadout extends StatelessWidget {
                   variables: primary,
                   values: values,
                   backstage: backstage,
+                  onVariableTap: onVariableTap,
                   legacyHints: system.schemaVersion < 3),
         ),
         if (secondary.isNotEmpty)
@@ -80,6 +83,7 @@ class GameplaySystemReadout extends StatelessWidget {
                   variables: secondary,
                   values: values,
                   backstage: false,
+                  onVariableTap: onVariableTap,
                   legacyHints: system.schemaVersion < 3)
             ],
           ),
@@ -161,11 +165,13 @@ class _VariableGroups extends StatelessWidget {
       {required this.variables,
       required this.values,
       required this.backstage,
+      this.onVariableTap,
       required this.legacyHints});
   final List<GameplayVariableDefinition> variables;
   final Map<String, dynamic> values;
   final bool backstage;
   final bool legacyHints;
+  final ValueChanged<GameplayVariableDefinition>? onVariableTap;
 
   @override
   Widget build(BuildContext context) {
@@ -187,6 +193,10 @@ class _VariableGroups extends StatelessWidget {
                 variable: variable,
                 value: values[variable.key],
                 backstage: backstage,
+                onTap: onVariableTap == null ||
+                        variable.visibility == GameplayVariableVisibility.engine
+                    ? null
+                    : () => onVariableTap!(variable),
                 legacyHints: legacyHints),
         ],
       ],
@@ -199,11 +209,13 @@ class _VariableTile extends StatelessWidget {
       {required this.variable,
       required this.value,
       required this.backstage,
+      this.onTap,
       required this.legacyHints});
   final GameplayVariableDefinition variable;
   final dynamic value;
   final bool backstage;
   final bool legacyHints;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -214,7 +226,7 @@ class _VariableTile extends StatelessWidget {
             : legacyHints
                 ? variable.description
                 : '';
-    return Padding(
+    final content = Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -229,6 +241,10 @@ class _VariableTile extends StatelessWidget {
               Flexible(
                   child: Text(variable.displayValue(value, reveal: backstage),
                       textAlign: TextAlign.end)),
+              if (onTap != null) ...[
+                const SizedBox(width: 8),
+                const Icon(Icons.history, size: 18),
+              ],
             ],
           ),
           if (hint.trim().isNotEmpty) ...[
@@ -240,6 +256,17 @@ class _VariableTile extends StatelessWidget {
                 '${variable.key} · ${variable.visibility.name} · ${variable.authority.name}',
                 style: Theme.of(context).textTheme.labelSmall),
         ],
+      ),
+    );
+    if (onTap == null) return content;
+    return Semantics(
+      button: true,
+      label: '查看${variable.label}的变化记录',
+      child: InkWell(
+        key: ValueKey('variable-history-${variable.key}'),
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: content,
       ),
     );
   }

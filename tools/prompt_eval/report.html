@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>未完剧场 · 提示词盲评</title>
+<style>
+:root{color-scheme:light;font-family:system-ui,"Microsoft YaHei",sans-serif;color:#263236;background:#f4f3ee}body{max-width:1280px;margin:auto;padding:24px}h1{font-size:28px}p{line-height:1.7}.notice{padding:16px;background:#fff2ce;border-radius:12px}.toolbar{position:sticky;top:0;background:#f4f3eef2;padding:12px 0;display:flex;gap:10px;flex-wrap:wrap;z-index:1}button,select,textarea{font:inherit;border:1px solid #b9c7c4;border-radius:8px;padding:9px;background:white}button{cursor:pointer}button.primary{background:#216557;color:white}article{background:white;padding:22px;border-radius:16px;margin:20px 0;box-shadow:0 3px 14px #163e3110}.pair{display:grid;grid-template-columns:1fr 1fr;gap:20px}.reply{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.8;border:1px solid #dce4e1;border-radius:10px;padding:16px;max-height:520px;overflow:auto;background:#fafcfb}.ratings{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.ratings label{display:grid;gap:5px;font-size:13px}.identity{font-family:monospace;overflow-wrap:anywhere;color:#55756a}.checks{color:#506b64}textarea{width:100%;box-sizing:border-box;min-height:72px}details{margin:10px 0}summary{cursor:pointer}.metrics{white-space:pre-wrap;font-size:13px;overflow-wrap:anywhere}#progress{align-self:center;margin-left:auto}footer{padding:24px 0;color:#55756a}@media(max-width:700px){body{padding:12px}.pair{grid-template-columns:1fr}article{padding:15px}h1{font-size:23px}.reply{max-height:400px}}
+</style>
+<h1>未完剧场 · 提示词盲评</h1>
+<div id="notice" class="notice"></div>
+<p>先看相同场景下的 A / B 回复，再打分。0 为明显不足，1 为一般，2 为表现好；不适用可留空。自动格式检查和文风评分分开记录。</p>
+<div class="toolbar"><button id="export" class="primary">导出评分 JSON</button><button id="reveal">揭晓版本</button><span id="progress"></span></div>
+<main id="cases"></main>
+<footer>报告完全在本机运行，不发送网络请求。评分保存在当前浏览器；导出文件可长期保存。盲评隐藏界面版本信息，不构成对查看源代码的保密措施。</footer>
+<script id="data" type="application/json">__REPORT_DATA__</script>
+<script>
+const data=JSON.parse(document.getElementById('data').textContent);
+const storageKey='theater-prompt-eval-'+data.reportId;
+let scores={};try{scores=JSON.parse(localStorage.getItem(storageKey)||'{}')}catch{}
+let revealed=false;
+const dims=['人物口吻','自然度','行动与因果','上下文一致','玩家自主权'];
+const el=(tag,text,cls)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node};
+function persist(){try{localStorage.setItem(storageKey,JSON.stringify(scores))}catch{}updateProgress()}
+function updateProgress(){document.getElementById('progress').textContent=Object.values(scores).filter(s=>s.preference).length+' / '+data.pairs.length+' 组已选择'}
+document.getElementById('notice').textContent=(data.mode==='live'?'真实模型结果，等待人工评审':'离线演示 · 回复来自模拟数据，不能证明文风效果')+'。模型 '+data.model+'。故障注入场景用于验证修复，不计入普通首轮通过率。';
+for(const pair of data.pairs){
+ const saved=scores[pair.id]||(scores[pair.id]={ratings:{},preference:'',reason:''});
+ const article=el('article');article.append(el('h2',pair.title+(pair.faultInjected?' · 故障注入':'')),el('p',pair.characterPrompt),el('p','本轮输入　'+pair.input),el('p','观察重点　'+pair.checks.join('；'),'checks'));
+ const context=el('details');context.append(el('summary','查看固定前情'),el('p',pair.history.map(m=>m.role+'　'+m.content).join('\n')));article.append(context);
+ const columns=el('div',undefined,'pair');
+ pair.variants.forEach((v,index)=>{
+   const label=index?'B':'A';const col=el('section');col.append(el('h3',label));
+   const identity=el('p','版本待揭晓','identity');identity.dataset.revision=v.revision;col.append(identity,el('div',v.output||'没有可用的最终回复。','reply'));
+   const rating=el('div',undefined,'ratings');
+   for(const dim of dims){const line=el('label',dim);const select=el('select');select.setAttribute('aria-label',pair.title+' '+label+' '+dim);for(const [value,text] of [['','未评 / 不适用'],['0','0 · 不足'],['1','1 · 一般'],['2','2 · 好']]){const option=el('option',text);option.value=value;select.append(option)}select.value=saved.ratings[label]?.[dim]??'';select.addEventListener('change',()=>{(saved.ratings[label]??={})[dim]=select.value;persist()});line.append(select);rating.append(line)}col.append(rating);
+   const detail=el('details');detail.append(el('summary','格式、初始输出与调用记录'));
+   detail.append(el('p','首轮 '+String(v.firstPassValid)+' · 最终 '+String(v.finalValid)+' · 额外调用 '+v.additionalRequests));
+   detail.append(el('pre',JSON.stringify({firstPassIssues:v.firstPassIssues,finalIssues:v.finalIssues,requests:v.requests.map(r=>({phase:r.phase,source:r.source,status:r.status,elapsedMs:r.elapsedMs,firstByteMs:r.firstByteMs,usage:r.usage,finishReason:r.finishReason}))},null,2),'metrics'));
+   detail.append(el('div',v.initialOutput||'无初始响应','reply'));col.append(detail);columns.append(col);
+ });article.append(columns);
+ const preference=el('select');preference.setAttribute('aria-label',pair.title+' 整体偏好');for(const [value,text]of [['','选择整体偏好'],['A','更喜欢 A'],['B','更喜欢 B'],['tie','相当'],['both_fail','两份都不合格']]){const o=el('option',text);o.value=value;preference.append(o)}preference.value=saved.preference;preference.addEventListener('change',()=>{saved.preference=preference.value;persist()});article.append(preference);
+ const reason=el('textarea');reason.placeholder='写一句具体理由，例如哪段对白更像人物、哪里丢失了事实。';reason.value=saved.reason;reason.setAttribute('aria-label',pair.title+' 评分理由');reason.addEventListener('input',()=>{saved.reason=reason.value;persist()});article.append(reason);document.getElementById('cases').append(article);
+}
+document.getElementById('reveal').addEventListener('click',()=>{revealed=true;document.querySelectorAll('.identity').forEach(n=>n.textContent=n.dataset.revision);document.getElementById('reveal').textContent='已揭晓版本'});
+document.getElementById('export').addEventListener('click',()=>{const payload={schemaVersion:1,reportId:data.reportId,mode:data.mode,model:data.model,fixtureHash:data.fixtureHash,revealed,exportedAt:new Date().toISOString(),scores,assignments:data.pairs.map(p=>({id:p.id,A:p.variants[0].revision,B:p.variants[1].revision}))};const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='prompt-eval-scores-'+data.reportId+'.json';a.click();URL.revokeObjectURL(url)});updateProgress();
+</script></html>
