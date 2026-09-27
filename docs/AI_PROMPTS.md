@@ -1,6 +1,6 @@
 # 内部 AI 提示词维护
 
-本清单按独立功能任务计数，共 50 套。system/user 配对、流式和非流式调用、同任务重试不重复计算。角色设定、世界书、状态快照等注入内容也不另算一套。连接测试只发送 `ping`，不在内容生成清单内。
+本清单按独立功能任务计数，共 51 套。system/user 配对、流式和非流式调用、同任务重试不重复计算。角色设定、世界书、状态快照等注入内容也不另算一套。连接测试只发送 `ping`，不在内容生成清单内。
 
 ## 写法与协议
 
@@ -18,7 +18,7 @@
 
 普通主剧情继续保留长篇要求，教程保持短回合，同人文保留长篇目标。轻量道具和独立小剧场根据任务给出适当篇幅，不再统一要求至少 2000 字。
 
-## 50 套任务清单
+## 51 套任务清单
 
 下表中的方法名用于定位代码，避免文案调整后行号失效。
 
@@ -66,16 +66,17 @@
 | 40 | 兽耳魔药 | 纯文字 | `_utilitySpec('beast_ear_potion')` |
 | 41 | 摸一摸 | 纯文字 | `_utilitySpec('touch')` |
 | 42 | 真心话棒棒糖 | 纯文字 | `_utilitySpec('truth_lollipop')` |
-| 43 | 主剧场回复 | 按模式组合正文和协议块 | `LlmApiClient` 的主回复构建流程 |
-| 44 | 长期记忆摘要 | 事实要点 | `LlmApiClient.summarizeConversation` |
-| 45 | 模拟器 / 世界设定生成 | JSON | `data/simulator_prompt_generator.dart` |
-| 46 | 变量玩法设计生成 | JSON | `data/gameplay_system_prompt.dart` |
-| 47 | 回合状态裁判 | JSON | `TurnStateAdjudicator` |
-| 48 | 模拟器 JSON 补全 | JSON | `LlmApiClient._buildSimulatorJsonContinuationPrompt` |
-| 49 | 变量玩法 JSON 修复 | JSON | `LlmApiClient._repairGameplaySystemJson` |
-| 50 | 主回复协议自动修复 | 按模式组合正文和协议块 | `LlmApiClient.repairChatReplyFormat` |
+| 43 | 互动番外小剧场 | HTML 及 `data-theater-*` 互动协议 | `generateInteractiveTheater` / `continueInteractiveTheater` |
+| 44 | 主剧场回复 | 按模式组合正文和协议块 | `LlmApiClient` 的主回复构建流程 |
+| 45 | 长期记忆摘要 | 事实要点 | `LlmApiClient.summarizeConversation` |
+| 46 | 模拟器 / 世界设定生成 | JSON | `data/simulator_prompt_generator.dart` |
+| 47 | 变量玩法设计生成 | JSON | `data/gameplay_system_prompt.dart` |
+| 48 | 回合状态裁判 | JSON | `TurnStateAdjudicator` |
+| 49 | 模拟器 JSON 补全 | JSON | `LlmApiClient._buildSimulatorJsonContinuationPrompt` |
+| 50 | 变量玩法 JSON 修复 | JSON | `LlmApiClient._repairGameplaySystemJson` |
+| 51 | 主回复协议自动修复 | 按模式组合正文和协议块 | `LlmApiClient.repairChatReplyFormat` |
 
-其中 21 套要求完整 JSON，1 套按分支选择 JSON 或正文，5 套回复包含 JSON 协议块，23 套输出文字或 HTML。第 4 项在本次修改前被互相矛盾的提前返回阻断，修复后恢复首次鉴定。
+其中 21 套要求完整 JSON，1 套按分支选择 JSON 或正文，5 套回复包含 JSON 协议块，24 套输出文字或 HTML。互动番外使用独立 HTML 协议，点击选择只继续当前番外，不进入主线状态结算。
 
 ## 共用规则与模式
 
@@ -87,6 +88,8 @@
 普通模式按开关输出 A–F 六个选项；教程使用 A–C 三个选项，HTML 可选。地图使用 `[MAP_STATE]` 的地点和行动，不输出 `[CHOICES]`，HTML 可选。群聊使用 `[GROUP_CHAT]`，不输出 HTML、地图块或行动选项。关闭选项不能关闭状态回传。
 
 `[GAME_STATE]` 使用状态字段文本；`[GROUP_CHAT]`、`[MAP_STATE]`、`[THEATER_PATCH]` 内为 JSON。启用变量玩法时，`[THEATER_PATCH]` 位于 `[GAME_STATE]` 后。导演信息可以参与后台判断，不能直接泄漏到玩家可见的正文、HTML、选项或公开字段；engine 私有变量不会注入模型。
+
+互动番外只使用独立的 `data-theater-group`、`data-choice-mode`、`data-theater-choice`、`data-theater-label` 和 `data-theater-submit` 属性；不输出脚本、外部资源或主线协议块。单选、多选和用户自定义提示词只影响当前番外，选择结果由本地桥接传回后再生成下一幕。
 
 ## 验证边界
 

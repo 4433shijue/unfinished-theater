@@ -29,6 +29,30 @@ class ReleaseNotes {
 }
 
 const ReleaseNotes currentReleaseNotes = ReleaseNotes(
+  id: 'v2.13.0',
+  version: 'V2.13.0',
+  title: 'V2.13.0 互动番外开场',
+  subtitle: '把主线之外的小灵感做成能点击、能重玩的独立小剧场。',
+  items: <ReleaseNoteItem>[
+    ReleaseNoteItem(
+      icon: Icons.touch_app_outlined,
+      title: '四种互动番外玩法',
+      description: '群聊彩蛋、分支短剧、物件探索和轻量小游戏都可以从当前故事里单独搭建。',
+    ),
+    ReleaseNoteItem(
+      icon: Icons.checklist_rounded,
+      title: '单选、多选和自定义提示词',
+      description: '可以选择一种玩法、组合多个方向，也可以直接填写自己的小剧场提示词并套用示例。',
+    ),
+    ReleaseNoteItem(
+      icon: Icons.theater_comedy_outlined,
+      title: '番外不会改主线',
+      description: '互动选择只保存到当前番外，主线时间、变量、好感、记忆和 NPC 档案保持不变。',
+    ),
+  ],
+);
+
+const ReleaseNotes _v2120ReleaseNotes = ReleaseNotes(
   id: 'v2.12.0',
   version: 'V2.12.0',
   title: 'V2.12.0 看懂变化，编写规则',
@@ -1732,6 +1756,7 @@ const ReleaseNotes _v210ReleaseNotes = ReleaseNotes(
 
 const List<ReleaseNotes> releaseNotesHistory = <ReleaseNotes>[
   currentReleaseNotes,
+  _v2120ReleaseNotes,
   _v2111ReleaseNotes,
   _v2110ReleaseNotes,
   _v2105ReleaseNotes,

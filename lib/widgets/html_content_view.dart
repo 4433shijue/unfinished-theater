@@ -10,10 +10,12 @@ class HtmlContentView extends StatelessWidget {
     super.key,
     required this.content,
     this.isStreaming = false,
+    this.onAction,
   });
 
   final String content;
   final bool isStreaming;
+  final ValueChanged<String>? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -88,6 +90,7 @@ class HtmlContentView extends StatelessWidget {
         return _RunnableSection(
           document: block.content,
           height: MessageContentParser.estimatePreviewHeight(block.content),
+          onAction: onAction,
         );
     }
   }
@@ -147,10 +150,12 @@ class _RunnableSection extends StatelessWidget {
   const _RunnableSection({
     required this.document,
     required this.height,
+    this.onAction,
   });
 
   final String document;
   final double height;
+  final ValueChanged<String>? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -181,6 +186,7 @@ class _RunnableSection extends StatelessWidget {
           RunnableCodePreview(
             document: document,
             height: height,
+            onAction: onAction,
           ),
         ],
       ),
@@ -220,6 +226,7 @@ class _RunnableSection extends StatelessWidget {
                     child: RunnableCodePreview(
                       document: document,
                       height: size.height * 0.9,
+                      onAction: onAction,
                     ),
                   ),
                 ],

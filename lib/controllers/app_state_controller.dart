@@ -18,6 +18,7 @@ import '../models/fanfic_result.dart';
 import '../models/game_state.dart';
 import '../models/gameplay_system.dart';
 import '../models/gamification.dart';
+import '../models/interactive_theater.dart';
 import '../models/map_state.dart';
 import '../models/npc_migration.dart';
 import '../models/npc_profile.dart';
@@ -8751,6 +8752,324 @@ title, stage, mainGoal, locations, edges, spawnCandidates, mapInventory, quests,
       notifyListeners();
     }
   }
+
+  /// Generates a self-contained interactive extra. It only reads the current
+  /// story snapshot; it never appends a user turn or runs the mainline state
+  /// settlement pipeline.
+  Future<String?> generateInteractiveTheater({
+    required InteractiveTheaterRequest request,
+    void Function(String partial)? onChunk,
+  }) async {
+    final character = currentCharacter;
+    if (character == null) {
+      return '请先选择一个 AI 角色。';
+    }
+    if (!_settings.canChat) {
+      return '请先在设置页填好 API 地址、密钥和模型名称。';
+    }
+    if (_isSending) {
+      return '当前还有回复正在生成，请稍等。';
+    }
+    if (!request.isValid) {
+      return '至少选择一种小剧场玩法，或填写一段自定义提示词。';
+    }
+
+    final history = await _ensureHistory(character.id);
+    if (history.messages.isEmpty) {
+      return '当前还没有聊天记录，无法从故事生成小剧场。';
+    }
+
+    _isSending = true;
+    _lastToolResultId = null;
+    _ephemeralToolResult = null;
+    notifyListeners();
+
+    final buffer = StringBuffer();
+    try {
+      final memory = await _ensureMemory(character.id);
+      final gameState = await _ensureGameState(character.id);
+      final npcProfiles = worldNpcProfilesForCharacter(character.id);
+      await for (final chunk in _apiClient.streamContent(
+        settings: _settings,
+        systemPrompt: _interactiveTheaterSystemPrompt,
+        userPrompt: _buildInteractiveTheaterPrompt(
+          request: request,
+          character: character,
+          history: history,
+          memory: memory,
+          gameState: gameState,
+          npcProfiles: npcProfiles,
+        ),
+        temperature: 0.78,
+        topP: 0.92,
+        maxTokens: 8192,
+      )) {
+        buffer.write(chunk);
+        onChunk?.call(buffer.toString());
+      }
+
+      var content = buffer.toString().trim();
+      if (content.isEmpty) {
+        return '小剧场生成了空内容。';
+      }
+      content = await _repairInteractiveTheaterMarkup(content);
+      if (!_hasInteractiveTheaterMarkup(content)) {
+        return '模型没有按互动小剧场协议生成可点击内容，请重试一次。';
+      }
+      final toolResult = ToolResult(
+        id: IdGenerator.generic('theater'),
+        characterId: character.id,
+        toolId: 'interactive_theater',
+        toolTitle: request.displayTitle,
+        content: content,
+        createdAt: DateTime.now(),
+        interactiveTheater: true,
+        theaterSelectionMode: request.selectionMode.code,
+        theaterKinds:
+            request.kinds.map((kind) => kind.code).toList(growable: false),
+        theaterPrompt: request.customPrompt.trim(),
+      );
+      _toolResults.insert(0, toolResult);
+      _lastToolResultId = toolResult.id;
+      await _store.saveToolResults(_toolResults);
+      await _updateGamification(
+        (state) => state.incrementStat('totalToolResults'),
+        notify: false,
+      );
+      return null;
+    } on LlmApiException catch (error) {
+      return error.message;
+    } catch (error) {
+      return '互动小剧场生成失败：$error';
+    } finally {
+      _isSending = false;
+      notifyListeners();
+    }
+  }
+
+  /// Continues an existing extra from its local selection. The result keeps
+  /// the same artifact id, so reopening the story workspace shows the latest
+  /// stage while the main dialogue remains unchanged.
+  Future<String?> continueInteractiveTheater({
+    required ToolResult previous,
+    required List<String> selections,
+    void Function(String partial)? onChunk,
+  }) async {
+    final character = currentCharacter;
+    if (character == null) {
+      return '请先选择一个 AI 角色。';
+    }
+    if (!_settings.canChat) {
+      return '请先在设置页填好 API 地址、密钥和模型名称。';
+    }
+    if (_isSending) {
+      return '当前还有回复正在生成，请稍等。';
+    }
+    if (!previous.isInteractiveTheater ||
+        previous.characterId != character.id) {
+      return '这条内容不是当前故事里的互动小剧场。';
+    }
+
+    final cleanedSelections = selections
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .take(8)
+        .toList(growable: false);
+    if (previous.theaterSelectionMode == 'single' &&
+        cleanedSelections.length != 1) {
+      return '单选小剧场需要先选择一个选项。';
+    }
+    if (previous.theaterSelectionMode == 'multi' && cleanedSelections.isEmpty) {
+      return '多选小剧场至少选择一个选项。';
+    }
+
+    _isSending = true;
+    _lastToolResultId = previous.id;
+    notifyListeners();
+
+    final buffer = StringBuffer();
+    try {
+      await for (final chunk in _apiClient.streamContent(
+        settings: _settings,
+        systemPrompt: _interactiveTheaterSystemPrompt,
+        userPrompt: _buildInteractiveTheaterContinuationPrompt(
+          previous: previous,
+          selections: cleanedSelections,
+          character: character,
+        ),
+        temperature: 0.76,
+        topP: 0.92,
+        maxTokens: 8192,
+      )) {
+        buffer.write(chunk);
+        onChunk?.call(buffer.toString());
+      }
+
+      var content = buffer.toString().trim();
+      if (content.isEmpty) {
+        return '小剧场没有生成新的内容。';
+      }
+      content = await _repairInteractiveTheaterMarkup(content);
+      if (!_hasInteractiveTheaterMarkup(content)) {
+        return '这一幕没有生成可继续的互动内容，请重新点选一次。';
+      }
+      final updated = previous.copyWith(
+        content: content,
+        theaterStep: previous.theaterStep + 1,
+      );
+      final index = _toolResults.indexWhere((item) => item.id == previous.id);
+      if (index == -1) {
+        _toolResults.insert(0, updated);
+      } else {
+        _toolResults[index] = updated;
+      }
+      _lastToolResultId = updated.id;
+      await _store.saveToolResults(_toolResults);
+      return null;
+    } on LlmApiException catch (error) {
+      return error.message;
+    } catch (error) {
+      return '互动小剧场继续生成失败：$error';
+    } finally {
+      _isSending = false;
+      notifyListeners();
+    }
+  }
+
+  String _buildInteractiveTheaterPrompt({
+    required InteractiveTheaterRequest request,
+    required CharacterProfile character,
+    required DialogueHistory history,
+    required CharacterMemory memory,
+    required GameStateSnapshot gameState,
+    required List<NpcProfile> npcProfiles,
+  }) {
+    final recentMessages = history.messages.length > 18
+        ? history.messages.sublist(history.messages.length - 18)
+        : history.messages;
+    final memories = memory.summaries.reversed
+        .take(_settings.memoryContextItems <= 0
+            ? memory.summaries.length
+            : _settings.memoryContextItems)
+        .map((summary) => '- ${summary.summaryText}')
+        .join('\n');
+    final npcFacts = npcProfiles
+        .map(
+          (npc) =>
+              '- ${npc.name}（ID：${npc.id}）｜好感 ${npc.affinity}｜生命周期 ${npc.lifecycle.label}｜印象：${npc.impression.trim().isEmpty ? '暂无' : npc.impression.trim()}',
+        )
+        .join('\n');
+
+    return '''
+任务：为当前故事生成一段独立的互动番外小剧场。
+
+这是主线之外的可重玩内容。它可以从当前人物、关系和场景获得灵感，但不得推进主线，不得更新时间、地点、任务、物品、好感、NPC 生命周期、变量、长期记忆或剧情事实。用户在小剧场里做出的选择只属于这段番外。
+
+${request.toPrompt()}
+
+【HTML 互动协议】
+1. 只输出一个完整、可运行的单文件 HTML，放进一个 ```html 代码块；代码块外不要输出解释或 Markdown。
+2. 页面手机优先，自带 CSS，不引用外部图片、字体、CSS、JS 或网络资源，不写 script、onclick、href 或表单提交。
+3. 必须有一个主要互动区域：使用 `<div data-theater-group="main" data-choice-mode="${request.selectionMode.code}">` 包住选项。
+4. 每个可以被玩家选择的元素都使用 `<button type="button" data-theater-choice="稳定的短 id" data-theater-label="玩家看得懂的选项名">`。单选模式提供 3-5 个选项，多选模式提供 3-6 个选项。
+5. 页面必须有一个 `<button type="button" data-theater-submit="继续小剧场">`。它只提交当前小剧场的选择，不是主线行动。
+6. 选项文字要具体，点击后下一阶段要能产生人物反应、物件反馈、笑点或小结局。不要只做换颜色的装饰按钮。
+7. 交互结果要停在一小段完整反馈处，并保留一组新的选项或明确的收束，不要把玩家的选择写成主线已发生事实。
+
+【当前故事资料，只作人物与语境参考】
+AI 角色：${character.name}
+角色简介：
+${character.visibleBlurb}
+
+当前游戏面板：
+${gameState.isEmpty ? '暂无。' : _formatGameStateForPrompt(gameState)}
+
+NPC 档案：
+${npcFacts.trim().isEmpty ? '暂无。' : npcFacts}
+
+世界书：
+${_formatWorldBooksForPrompt(character.id)}
+
+长期记忆：
+${memories.trim().isEmpty ? '暂无。' : memories}
+
+最近聊天记录：
+${_formatTranscript(recentMessages)}
+''';
+  }
+
+  String _buildInteractiveTheaterContinuationPrompt({
+    required ToolResult previous,
+    required List<String> selections,
+    required CharacterProfile character,
+  }) {
+    final previousContent = previous.content.trim();
+    final clippedContent = previousContent.length > 18000
+        ? '${previousContent.substring(0, 18000)}\n[上一阶段 HTML 已截断]'
+        : previousContent;
+    final mode = previous.theaterSelectionMode == 'multi' ? 'multi' : 'single';
+    return '''
+任务：继续一段独立互动番外小剧场。
+
+当前 AI 角色：${character.name}
+小剧场原始玩法：${previous.theaterKinds.isEmpty ? '用户自定义' : previous.theaterKinds.join(', ')}
+互动模式：$mode
+用户本次选择：
+${selections.map((item) => '- $item').join('\n')}
+用户最初补充要求：${previous.theaterPrompt.trim().isEmpty ? '无' : previous.theaterPrompt.trim()}
+
+上一阶段 HTML：
+$clippedContent
+
+请根据用户本次选择继续这一段番外。保留已建立的人物口吻和现场关系，让选择产生一个具体的反馈、对白、发现、操作结果或小笑点。不要回到主线，不要把番外结果写入任何正式状态。
+
+输出规则：只输出一个完整单文件 HTML，并放进唯一的 ```html 代码块；不要输出解释、[CHOICES]、[GAME_STATE]、JSON 或代码块外正文。页面继续使用 data-theater-group、data-choice-mode="$mode"、data-theater-choice、data-theater-label 和 data-theater-submit。需要下一次互动时保留新的选项，不需要时给出完整收束按钮。不要写 script、onclick、外部资源或网络请求。
+''';
+  }
+
+  bool _hasInteractiveTheaterMarkup(String content) {
+    final normalized = content.toLowerCase();
+    return normalized.contains('data-theater-choice') &&
+        normalized.contains('data-theater-submit') &&
+        (normalized.contains('<html') || normalized.contains('<!doctype'));
+  }
+
+  Future<String> _repairInteractiveTheaterMarkup(String content) async {
+    if (_hasInteractiveTheaterMarkup(content)) {
+      return content;
+    }
+    final clipped = content.length > 18000
+        ? '${content.substring(0, 18000)}\n[原始结果已截断]'
+        : content;
+    try {
+      final repaired = await _apiClient.runUtilityTask(
+        settings: _settings,
+        systemPrompt: _interactiveTheaterRepairSystemPrompt,
+        userPrompt: '请把下面的结果修复成符合协议的完整 HTML：\n$clipped',
+        temperature: 0.12,
+        topP: 0.8,
+      );
+      final normalized = repaired.trim();
+      return normalized.isEmpty ? content : normalized;
+    } catch (_) {
+      return content;
+    }
+  }
+
+  static const String _interactiveTheaterSystemPrompt = '''
+你是 AI 角色扮演文字游戏里的互动番外导演。
+你负责把已有故事资料变成一段有具体人物反应、有操作反馈、可以在手机上直接玩的独立 HTML 小剧场。
+
+番外的创作自由只用于这段临时作品。不能把新增内容伪装成主线事实，不能替玩家写正式剧情里的行动，不能更新任何状态，不能输出内部协议说明。
+HTML 会在一个隔离的本地预览中运行。模型生成的脚本、事件属性、外链和网络请求都会被移除；互动必须依赖指定的 data-theater-* 属性。
+''';
+
+  static const String _interactiveTheaterRepairSystemPrompt = '''
+你只负责修复互动番外 HTML 的结构，不改写故事内容。
+只输出一个完整的单文件 HTML，放在唯一的 ```html 代码块中。
+保留已有正文和样式，补齐 data-theater-group、data-choice-mode、data-theater-choice、data-theater-label、data-theater-submit 属性。
+不要输出 script、onclick、href、外部资源、[CHOICES]、[GAME_STATE]、JSON 或代码块外解释。
+''';
 
   Future<String?> generateFanfic({
     required String pairingMode,

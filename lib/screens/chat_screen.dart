@@ -19,6 +19,7 @@ import '../models/fanfic_blind_box.dart';
 import '../models/fanfic_result.dart';
 import '../models/game_state.dart';
 import '../models/gamification.dart';
+import '../models/interactive_theater.dart';
 import '../models/map_state.dart';
 import '../models/npc_profile.dart';
 import '../models/story_systems.dart';
@@ -53,6 +54,7 @@ part 'chat/game_hub_inventory_dialogs.dart';
 part 'chat/chat_dialogs_and_effects.dart';
 part 'chat/chat_layout_widgets.dart';
 part 'chat/story_insights_dialog.dart';
+part 'chat/interactive_theater_dialog.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -234,6 +236,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   onCreateFanfic: _showFanficDialog,
                   onCreateNpcDiary: _createNpcDiary,
                   onCreateWorldFeed: _createWorldFeed,
+                  onCreateInteractiveTheater: _showInteractiveTheaterBuilder,
                   onOpenToolResult: _showToolResultSheet,
                   onOpenFanficResult: _showFanficResultSheet,
                 ),
@@ -1708,6 +1711,33 @@ class _ChatScreenState extends State<ChatScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
   }
 
+  Future<void> _showInteractiveTheaterBuilder() async {
+    final request = await showInteractiveTheaterBuilderDialog(context);
+    if (request == null || !mounted) {
+      return;
+    }
+
+    final controller = context.read<AppStateController>();
+    final error = await _withTopLoading<String?>(
+      context,
+      '正在搭建互动小剧场…',
+      () => controller.generateInteractiveTheater(request: request),
+    );
+    if (!mounted) {
+      return;
+    }
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppTheme.glitchText(error))),
+      );
+      return;
+    }
+    final result = controller.lastGeneratedToolResult;
+    if (result != null) {
+      await _showToolResultSheet(result);
+    }
+  }
+
   Future<void> _runConversationTool(String toolId) async {
     Navigator.of(context).maybePop();
     final appState = context.read<AppStateController>();
@@ -1787,6 +1817,24 @@ ${choice.index}. ${choice.label}
   }
 
   Future<void> _showToolResultSheet(ToolResult result) async {
+    if (result.isInteractiveTheater) {
+      await showInteractiveTheaterResultDialog(
+        context,
+        result: result,
+        onContinue: (current, selections) async {
+          final controller = context.read<AppStateController>();
+          final error = await controller.continueInteractiveTheater(
+            previous: current,
+            selections: selections,
+          );
+          return InteractiveTheaterContinuation(
+            result: error == null ? controller.lastGeneratedToolResult : null,
+            error: error,
+          );
+        },
+      );
+      return;
+    }
     await showDialog<void>(
       context: context,
       builder: (dialogContext) {
