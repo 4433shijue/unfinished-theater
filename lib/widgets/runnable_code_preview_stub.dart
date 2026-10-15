@@ -1,3 +1,4 @@
+import '../services/html_interaction_bridge.dart';
 import 'package:flutter/material.dart';
 
 class RunnableCodePreview extends StatelessWidget {
@@ -6,8 +7,10 @@ class RunnableCodePreview extends StatelessWidget {
     required this.document,
     required this.height,
     this.onAction,
+    this.interactionPolicy = HtmlInteractionPolicy.actions,
   });
 
+  final HtmlInteractionPolicy interactionPolicy;
   final String document;
   final double height;
   final ValueChanged<String>? onAction;

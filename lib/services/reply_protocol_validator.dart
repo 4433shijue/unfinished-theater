@@ -1,3 +1,4 @@
+import 'narrative_content.dart';
 import '../models/game_state.dart';
 import 'game_state_parser.dart';
 import 'gameplay_patch_engine.dart';
@@ -28,6 +29,8 @@ class ReplyProtocolValidator {
     int expectedChoiceCount = 6,
     bool htmlRequired = true,
   }) {
+    final originalContent = content;
+    content = NarrativeContent.withoutHtml(content);
     final issues = <String>[];
     final hasGameState = GameStateParser.stateBlockPattern.hasMatch(content);
     final hasUsableGameState =
@@ -51,7 +54,7 @@ class ReplyProtocolValidator {
           issues.add('缺少 [GROUP_CHAT] 群聊 JSON 块');
         }
         _validateGameState(issues, hasGameState, hasUsableGameState);
-        if (_htmlPattern.hasMatch(content)) {
+        if (_htmlPattern.hasMatch(originalContent)) {
           issues.add('群聊模式不应输出 HTML 美化框');
         }
         if (parsed.choices.isNotEmpty) {
@@ -70,7 +73,7 @@ class ReplyProtocolValidator {
           issues.add('地图模式不应输出 [CHOICES]');
         }
       case ReplyProtocolMode.standard:
-        if (htmlRequired && !_htmlPattern.hasMatch(content)) {
+        if (htmlRequired && !_htmlPattern.hasMatch(originalContent)) {
           issues.add('缺少 HTML 美化框');
         }
         _validateGameState(issues, hasGameState, hasUsableGameState);
@@ -230,7 +233,20 @@ class ReplyProtocolReconciler {
   static bool hasUsableGameState(String content) =>
       _lastUsableGameStateBlock(content) != null;
 
-  static String mergeStateBlocks({
+  static String mergeStateBlocks(
+          {required String primary,
+          required String fallback,
+          required bool gameplayPatchRequired,
+          bool preferFallback = false}) =>
+      NarrativeContent.transformOutsideHtml(
+          primary,
+          (masked) => _mergeCanonicalStateBlocks(
+              primary: masked,
+              fallback: NarrativeContent.withoutHtml(fallback),
+              gameplayPatchRequired: gameplayPatchRequired,
+              preferFallback: preferFallback));
+
+  static String _mergeCanonicalStateBlocks({
     required String primary,
     required String fallback,
     required bool gameplayPatchRequired,
@@ -271,6 +287,7 @@ class ReplyProtocolReconciler {
   }
 
   static String? _lastUsableGameStateBlock(String content) {
+    content = NarrativeContent.withoutHtml(content);
     final matches =
         GameStateParser.stateBlockPattern.allMatches(content).toList();
     for (final match in matches.reversed) {
@@ -288,6 +305,7 @@ class ReplyProtocolReconciler {
   }
 
   static String? _lastValidGameplayPatchBlock(String content) {
+    content = NarrativeContent.withoutHtml(content);
     final matches =
         GameplayPatchParser.blockPattern.allMatches(content).toList();
     for (final match in matches.reversed) {

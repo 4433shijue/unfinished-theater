@@ -1,3 +1,7 @@
+import '../services/inline_theater_contract.dart';
+import '../services/narrative_content.dart';
+import '../services/html_interaction_bridge.dart';
+import '../services/runnable_html_sandbox.dart';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -533,7 +537,17 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
           code: block.content,
         );
       case MessageContentBlockType.runnablePreview:
-        if (widget.isStreaming) {
+        final isTheater = block.content.contains('data-inline-theater') ||
+            widget.message.inlineTheaterThemeId != null;
+        if (isTheater &&
+            InlineTheaterContract.validateDocument(block.content,
+                    expectedTheme: widget.message.inlineTheaterThemeId)
+                .isNotEmpty) {
+          return widget.isStreaming
+              ? const _PreviewPlaceholder()
+              : const Text(InlineTheaterContract.unavailable);
+        }
+        if (widget.isStreaming && !isTheater) {
           return const _PreviewPlaceholder();
         }
         final screenWidth = MediaQuery.sizeOf(context).width;
@@ -551,6 +565,7 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
               width: previewWidth,
               child: _StandalonePreviewCard(
                 document: block.content,
+                localOnly: isTheater,
                 height:
                     MessageContentParser.estimatePreviewHeight(block.content),
                 onAction:
@@ -826,11 +841,12 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
     final text = MessageContentParser.visibleStreamingText(
       widget.message.content,
     );
-    final start = text.indexOf('[CHOICES]');
-    if (start == -1) {
-      return text;
-    }
-    return text.substring(0, start).trimRight();
+    final docs = NarrativeContent.htmlDocuments(widget.message.content);
+    final ready = docs.length == 1 &&
+        InlineTheaterContract.validateDocument(docs.single,
+                expectedTheme: widget.message.inlineTheaterThemeId)
+            .isEmpty;
+    return ready ? '$text\n\n```html\n${docs.single}\n```' : text;
   }
 
   String get _footerTimestamp {
@@ -2110,9 +2126,11 @@ class _StandalonePreviewCard extends StatefulWidget {
     required this.document,
     required this.height,
     this.onAction,
+    this.localOnly = false,
     this.initiallyExpanded = true,
   });
 
+  final bool localOnly;
   final String document;
   final double height;
   final ValueChanged<String>? onAction;
@@ -2164,6 +2182,7 @@ class _StandalonePreviewCardState extends State<_StandalonePreviewCard> {
       child: Column(
         children: <Widget>[
           _PreviewToolbar(
+            label: widget.localOnly ? '番外 · 不影响主线' : '互动剧情面板',
             onFullscreen: _openFullscreen,
             onToggle: () => setState(() => _expanded = !_expanded),
             expanded: _expanded,
@@ -2178,11 +2197,15 @@ class _StandalonePreviewCardState extends State<_StandalonePreviewCard> {
               key: ValueKey<int>(_previewVersion),
               document: widget.document,
               height: widget.height,
-              onAction: widget.onAction,
+              onAction: widget.localOnly ? null : widget.onAction,
+              interactionPolicy: widget.localOnly
+                  ? HtmlInteractionPolicy.localOnly
+                  : HtmlInteractionPolicy.actions,
             ),
           ] else ...<Widget>[
             const SizedBox(height: 8),
             _DeferredPreviewHint(
+              localOnly: widget.localOnly,
               documentLength: widget.document.length,
               onExpand: () => setState(() => _expanded = true),
               onFullscreen: _openFullscreen,
@@ -2206,7 +2229,10 @@ class _StandalonePreviewCardState extends State<_StandalonePreviewCard> {
   Future<void> _exportSource() async {
     final ok = await downloadTextFile(
       filename: 'interactive_panel.html',
-      content: widget.document,
+      content: RunnableHtmlSandbox.build(
+          document: widget.document,
+          trustedBridgeScript: HtmlInteractionBridge.build(
+              policy: HtmlInteractionPolicy.localOnly)),
       mimeType: 'text/html;charset=utf-8',
     );
     if (!mounted) {
@@ -2231,7 +2257,7 @@ class _StandalonePreviewCardState extends State<_StandalonePreviewCard> {
                   children: <Widget>[
                     Expanded(
                       child: Text(
-                        '互动剧情面板',
+                        widget.localOnly ? '番外 · 不影响主线' : '互动剧情面板',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                     ),
@@ -2253,7 +2279,10 @@ class _StandalonePreviewCardState extends State<_StandalonePreviewCard> {
                       child: RunnableCodePreview(
                         document: widget.document,
                         height: MediaQuery.sizeOf(context).height * 0.82,
-                        onAction: widget.onAction,
+                        onAction: widget.localOnly ? null : widget.onAction,
+                        interactionPolicy: widget.localOnly
+                            ? HtmlInteractionPolicy.localOnly
+                            : HtmlInteractionPolicy.actions,
                       ),
                     ),
                   ),
@@ -2269,6 +2298,7 @@ class _StandalonePreviewCardState extends State<_StandalonePreviewCard> {
 
 class _PreviewToolbar extends StatelessWidget {
   const _PreviewToolbar({
+    required this.label,
     required this.onFullscreen,
     required this.onToggle,
     required this.expanded,
@@ -2277,6 +2307,7 @@ class _PreviewToolbar extends StatelessWidget {
     required this.onExport,
   });
 
+  final String label;
   final VoidCallback onFullscreen;
   final VoidCallback onToggle;
   final bool expanded;
@@ -2290,7 +2321,7 @@ class _PreviewToolbar extends StatelessWidget {
       children: <Widget>[
         Expanded(
           child: Text(
-            '互动剧情面板',
+            label,
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
                   color: AppTheme.activePrimary,
                   fontWeight: FontWeight.w900,
@@ -2651,11 +2682,13 @@ class _GroupChatActionButton extends StatelessWidget {
 
 class _DeferredPreviewHint extends StatelessWidget {
   const _DeferredPreviewHint({
+    this.localOnly = false,
     required this.documentLength,
     required this.onExpand,
     required this.onFullscreen,
   });
 
+  final bool localOnly;
   final int documentLength;
   final VoidCallback onExpand;
   final VoidCallback onFullscreen;
@@ -2677,7 +2710,7 @@ class _DeferredPreviewHint extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(
-            AppTheme.glitchText('HTML 美化框已折叠'),
+            AppTheme.glitchText(localOnly ? '番外已折叠' : 'HTML 美化框已折叠'),
             style: theme.textTheme.labelLarge?.copyWith(
               color: AppTheme.textMain,
               fontWeight: FontWeight.w900,
@@ -2686,7 +2719,9 @@ class _DeferredPreviewHint extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             AppTheme.glitchText(
-              '这段面板约 ${_formatPreviewSize(documentLength)}，展开时才会渲染，长聊天会更顺。',
+              localOnly
+                  ? '展开看看这一回合的小彩蛋。'
+                  : '这段面板约 ${_formatPreviewSize(documentLength)}，展开时才会渲染，长聊天会更顺。',
             ),
             style: theme.textTheme.bodySmall?.copyWith(
               color: AppTheme.textMuted,

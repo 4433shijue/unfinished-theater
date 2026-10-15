@@ -1,6 +1,6 @@
 # 内部 AI 提示词维护
 
-本清单按独立功能任务计数，共 51 套。system/user 配对、流式和非流式调用、同任务重试不重复计算。角色设定、世界书、状态快照等注入内容也不另算一套。连接测试只发送 `ping`，不在内容生成清单内。
+本清单按独立功能任务计数，共 50 套。system/user 配对、流式和非流式调用、同任务重试不重复计算。角色设定、世界书、状态快照等注入内容也不另算一套。连接测试只发送 `ping`，不在内容生成清单内。
 
 ## 写法与协议
 
@@ -16,9 +16,9 @@
 - 状态裁判依据已发生的行为和结算结果更新状态，不能为了戏剧效果更改数值。
 - 格式修复只修结构和表达错误，不推进剧情、不增加奖励，也不重复结算变量。
 
-普通主剧情继续保留长篇要求，教程保持短回合，同人文保留长篇目标。轻量道具和独立小剧场根据任务给出适当篇幅，不再统一要求至少 2000 字。
+普通主剧情继续保留长篇要求，教程保持短回合，同人文保留长篇目标。轻量道具和每回合番外根据任务给出适当篇幅，不再统一要求至少 2000 字。
 
-## 51 套任务清单
+## 50 套任务清单
 
 下表中的方法名用于定位代码，避免文案调整后行号失效。
 
@@ -66,17 +66,16 @@
 | 40 | 兽耳魔药 | 纯文字 | `_utilitySpec('beast_ear_potion')` |
 | 41 | 摸一摸 | 纯文字 | `_utilitySpec('touch')` |
 | 42 | 真心话棒棒糖 | 纯文字 | `_utilitySpec('truth_lollipop')` |
-| 43 | 互动番外小剧场 | HTML 及 `data-theater-*` 互动协议 | `generateInteractiveTheater` / `continueInteractiveTheater` |
-| 44 | 主剧场回复 | 按模式组合正文和协议块 | `LlmApiClient` 的主回复构建流程 |
-| 45 | 长期记忆摘要 | 事实要点 | `LlmApiClient.summarizeConversation` |
-| 46 | 模拟器 / 世界设定生成 | JSON | `data/simulator_prompt_generator.dart` |
-| 47 | 变量玩法设计生成 | JSON | `data/gameplay_system_prompt.dart` |
-| 48 | 回合状态裁判 | JSON | `TurnStateAdjudicator` |
-| 49 | 模拟器 JSON 补全 | JSON | `LlmApiClient._buildSimulatorJsonContinuationPrompt` |
-| 50 | 变量玩法 JSON 修复 | JSON | `LlmApiClient._repairGameplaySystemJson` |
-| 51 | 主回复协议自动修复 | 按模式组合正文和协议块 | `LlmApiClient.repairChatReplyFormat` |
+| 43 | 主剧场回复 | 按模式组合正文和协议块 | `LlmApiClient` 的主回复构建流程 |
+| 44 | 长期记忆摘要 | 事实要点 | `LlmApiClient.summarizeConversation` |
+| 45 | 模拟器 / 世界设定生成 | JSON | `data/simulator_prompt_generator.dart` |
+| 46 | 变量玩法设计生成 | JSON | `data/gameplay_system_prompt.dart` |
+| 47 | 回合状态裁判 | JSON | `TurnStateAdjudicator` |
+| 48 | 模拟器 JSON 补全 | JSON | `LlmApiClient._buildSimulatorJsonContinuationPrompt` |
+| 49 | 变量玩法 JSON 修复 | JSON | `LlmApiClient._repairGameplaySystemJson` |
+| 50 | 主回复协议自动修复 | 按模式组合正文和协议块 | `LlmApiClient.repairChatReplyFormat` |
 
-其中 21 套要求完整 JSON，1 套按分支选择 JSON 或正文，5 套回复包含 JSON 协议块，24 套输出文字或 HTML。互动番外使用独立 HTML 协议，点击选择只继续当前番外，不进入主线状态结算。
+其中 21 套要求完整 JSON，1 套按分支选择 JSON 或正文，5 套回复包含 JSON 协议块，23 套输出文字或 HTML。每回合番外属于主回复的一部分，局部点击不再调用模型。
 
 ## 共用规则与模式
 
@@ -85,11 +84,10 @@
 - `services/gameplay_prompt_context.dart` 注入变量可见性、允许写入的路径、本地结算与承诺约束。
 - `models/story_systems.dart` 把临时导演偏好转换为指令，偏好不能替玩家作决定或改写已发生的事实。
 
-普通模式按开关输出 A–F 六个选项；教程使用 A–C 三个选项，HTML 可选。地图使用 `[MAP_STATE]` 的地点和行动，不输出 `[CHOICES]`，HTML 可选。群聊使用 `[GROUP_CHAT]`，不输出 HTML、地图块或行动选项。关闭选项不能关闭状态回传。
+普通模式按开关输出 A–F 六个选项；教程使用 A–C 三个选项，不输出 HTML 番外。地图使用 `[MAP_STATE]` 的地点和行动，不输出 `[CHOICES]`；普通文游及地图按角色开关附赠一个非正史番外。群聊使用 `[GROUP_CHAT]`，不输出 HTML、地图块或行动选项。关闭选项不能关闭状态回传。
 
 `[GAME_STATE]` 使用状态字段文本；`[GROUP_CHAT]`、`[MAP_STATE]`、`[THEATER_PATCH]` 内为 JSON。启用变量玩法时，`[THEATER_PATCH]` 位于 `[GAME_STATE]` 后。导演信息可以参与后台判断，不能直接泄漏到玩家可见的正文、HTML、选项或公开字段；engine 私有变量不会注入模型。
 
-互动番外只使用独立的 `data-theater-group`、`data-choice-mode`、`data-theater-choice`、`data-theater-label` 和 `data-theater-submit` 属性；不输出脚本、外部资源或主线协议块。单选、多选和用户自定义提示词只影响当前番外，选择结果由本地桥接传回后再生成下一幕。
 
 ## 验证边界
 
@@ -98,3 +96,18 @@
 模拟器成功结果必须包含非空字符串 `name`、`description`、`opening`、`systemPrompt`。缺失或类型错误会进入一次补全，补全后仍不完整应报告失败；完整的旧标签格式继续兼容。玩法修复需带上完整 schema 与原始错误，修复后仍经过正式解析器。
 
 测试应检查请求组合、解析行为、有限重试、模式差异、变量权限与失败回滚。不要把测试写成大量文案逐字快照，也不要把模拟 HTTP 测试描述为真实模型文风验收。文风效果需要使用相同模型和相同剧情样本对比。
+
+
+## 每回合番外协议（V2.13.1）
+
+角色编辑页的“每回合番外”保存 `InlineTheaterSettings`：开关、single/multiple/custom 模式、按勾选顺序保存的主题 ID 和自定义提示词。默认轮换 backstageChat、innerVoice、whatIf；其余主题为 interview、branchingScene、objects、miniGame。重生成依据目标回合之前的完整分支计算主题，不使用截短后的请求窗口。
+
+`InlineTheaterContract` 集中提供主题边界、创作指导、可运行示例及本地校验。每回合只生成一个完整 HTML，根元素携带 `data-inline-theater="主题ID"`。禁止状态卡、属性表、任务板、背包、主线协议和远程行动按钮。所有结果一次生成；`data-extra-action` 支持 reveal、toggle、show、reset，`data-extra-target` 指向单个元素 ID，切换同组内容使用 `data-extra-group`。不执行模型 JavaScript。
+
+番外保存在原回复里用于显示；`ChatMessage.inlineTheaterThemeId` 记录回合主题。`NarrativeContent` 在主线状态、裁判、记忆、NPC 资料、工具上下文和两类历史回放之前隔离 HTML。旧历史的回放协议升级到 2，清除旧请求快照及缓存阶段，不删除显示用原文与主线记忆。
+
+缺失或违规的 HTML 最多沿用既有格式修复请求处理一次，修复失败显示“本回合彩蛋未生成”。没有额外的点击生成或自动重试请求。升级和导入时丢弃旧 interactive_theater 工具结果或带旧互动标记的记录，保留其他工具结果。
+
+浏览器验证：先执行 `dart run tools/inline_theater_fixtures.dart`，再用可用的 Playwright 运行 `node tools/inline_theater_browser_test.cjs`。可通过 THEATER_PLAYWRIGHT_MODULE 指定现有 Playwright 模块位置。Flutter 组件验收入口为 `test/browser/inline_theater_app.dart`，只用于测试构建。
+
+真实 Flutter 组件点击验收：将上述入口编译为 Web 并用本地 HTTP 服务打开，再运行 `node tools/inline_theater_flutter_browser_test.cjs http://127.0.0.1:8913`，覆盖未闭合文档、流式显示、桌面与手机、全屏、重置、历史折叠以及主线输入计数。测试截图与结果保存在 build/inline-theater-qa。

@@ -1,3 +1,5 @@
+import 'package:ai_roleplay_chat/models/inline_theater_settings.dart';
+import 'package:ai_roleplay_chat/services/narrative_content.dart';
 import 'dart:convert';
 
 import 'package:ai_roleplay_chat/controllers/app_state_controller.dart';
@@ -717,7 +719,15 @@ class _FakeMapLlmApiClient extends LlmApiClient {
     final responseIndex = callCount - 1 < _responses.length
         ? callCount - 1
         : _responses.length - 1;
-    final response = _responses[responseIndex];
+    final requestedTheme = RegExp(r'本轮唯一主题ID：([a-zA-Z]+)')
+            .allMatches(userPrompt + systemPrompt)
+            .lastOrNull
+            ?.group(1) ??
+        'backstageChat';
+    final theme =
+        InlineTheaterTheme.values.firstWhere((t) => t.name == requestedTheme);
+    final response =
+        '${NarrativeContent.withoutHtml(_responses[responseIndex])}\n```html\n${theme.exampleHtml}\n```';
     if (systemPrompt.contains('格式修复器')) {
       repairPrompt = userPrompt;
       return response;

@@ -28,6 +28,7 @@ class ChatMessage {
     required this.content,
     required this.timestamp,
     required this.isSummarized,
+    this.inlineTheaterThemeId,
     this.isBookmarked = false,
     this.bookmarkNote = '',
     this.gameStateSnapshot,
@@ -45,6 +46,7 @@ class ChatMessage {
       timestamp: DateTime.tryParse(json['timestamp']?.toString() ?? '') ??
           DateTime.now(),
       isSummarized: json['isSummarized'] == true,
+      inlineTheaterThemeId: json['inlineTheaterThemeId']?.toString(),
       isBookmarked: json['isBookmarked'] == true,
       bookmarkNote: json['bookmarkNote']?.toString() ?? '',
       gameStateSnapshot: json['gameStateSnapshot'] is Map
@@ -62,6 +64,7 @@ class ChatMessage {
   final String content;
   final DateTime timestamp;
   final bool isSummarized;
+  final String? inlineTheaterThemeId;
   final bool isBookmarked;
   final String bookmarkNote;
   final Map<String, dynamic>? gameStateSnapshot;
@@ -76,6 +79,7 @@ class ChatMessage {
     String? content,
     DateTime? timestamp,
     bool? isSummarized,
+    String? inlineTheaterThemeId,
     bool? isBookmarked,
     String? bookmarkNote,
     Map<String, dynamic>? gameStateSnapshot,
@@ -94,6 +98,7 @@ class ChatMessage {
       content: content ?? this.content,
       timestamp: timestamp ?? this.timestamp,
       isSummarized: isSummarized ?? this.isSummarized,
+      inlineTheaterThemeId: inlineTheaterThemeId ?? this.inlineTheaterThemeId,
       isBookmarked: isBookmarked ?? this.isBookmarked,
       bookmarkNote: bookmarkNote ?? this.bookmarkNote,
       gameStateSnapshot: clearGameStateSnapshot
@@ -118,6 +123,8 @@ class ChatMessage {
       'content': content,
       'timestamp': timestamp.toIso8601String(),
       'isSummarized': isSummarized,
+      if (inlineTheaterThemeId != null)
+        'inlineTheaterThemeId': inlineTheaterThemeId,
       'isBookmarked': isBookmarked,
       'bookmarkNote': bookmarkNote,
       if (gameStateSnapshot != null) 'gameStateSnapshot': gameStateSnapshot,

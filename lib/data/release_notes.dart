@@ -29,6 +29,31 @@ class ReleaseNotes {
 }
 
 const ReleaseNotes currentReleaseNotes = ReleaseNotes(
+  id: 'v2.13.1',
+  version: 'V2.13.1',
+  title: 'V2.13.1 每回合都有小彩蛋',
+  subtitle: '正文后的美化窗口专心演番外，主线继续好好讲故事。',
+  items: <ReleaseNoteItem>[
+    ReleaseNoteItem(
+        icon: Icons.theater_comedy_outlined,
+        title: '正文附赠互动番外',
+        description: '每回合自动生成一个可点击的小剧场，主题贴合人物和情境，不再用游戏状态卡填充窗口。'),
+    ReleaseNoteItem(
+        icon: Icons.tune,
+        title: '按剧本选择你想看的主题',
+        description: '七种主题支持固定一个、多个轮换和自定义提示词，也可以查看示例或关闭番外。'),
+    ReleaseNoteItem(
+        icon: Icons.touch_app_outlined,
+        title: '点击即看，不影响主线',
+        description: '展开心声、切换视角和体验短分支都在窗口内完成，不额外请求 AI，也不进入主线记忆或结算。'),
+    ReleaseNoteItem(
+        icon: Icons.cleaning_services_outlined,
+        title: '撤下旧版独立小剧场',
+        description: '移除旧独立生成入口并清理该功能的历史作品，主线存档和其他工具结果保留。'),
+  ],
+);
+
+const ReleaseNotes _v2130ReleaseNotes = ReleaseNotes(
   id: 'v2.13.0',
   version: 'V2.13.0',
   title: 'V2.13.0 互动番外开场',
@@ -1756,6 +1781,7 @@ const ReleaseNotes _v210ReleaseNotes = ReleaseNotes(
 
 const List<ReleaseNotes> releaseNotesHistory = <ReleaseNotes>[
   currentReleaseNotes,
+  _v2130ReleaseNotes,
   _v2120ReleaseNotes,
   _v2111ReleaseNotes,
   _v2110ReleaseNotes,

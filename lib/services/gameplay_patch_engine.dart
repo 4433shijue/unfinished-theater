@@ -1,3 +1,4 @@
+import 'narrative_content.dart';
 import 'dart:convert';
 
 import '../models/gameplay_system.dart';
@@ -101,6 +102,7 @@ class GameplayPatchParser {
   }
 
   static GameplayPatchParseResult parseResult(String content) {
+    content = NarrativeContent.withoutHtml(content);
     final matches = blockPattern.allMatches(content).toList(growable: false);
     if (matches.isEmpty) {
       final hasOpeningTag = RegExp(

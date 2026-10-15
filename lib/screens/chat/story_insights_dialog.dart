@@ -5,7 +5,6 @@ Future<void> showStoryInsightsDialog(
   required VoidCallback onCreateFanfic,
   required Future<void> Function(NpcProfile npc) onCreateNpcDiary,
   required Future<void> Function() onCreateWorldFeed,
-  required VoidCallback onCreateInteractiveTheater,
   required Future<void> Function(ToolResult result) onOpenToolResult,
   required Future<void> Function(FanficResult result) onOpenFanficResult,
 }) async {
@@ -112,8 +111,6 @@ Future<void> showStoryInsightsDialog(
                               onCreateFanfic: onCreateFanfic,
                               onCreateNpcDiary: onCreateNpcDiary,
                               onCreateWorldFeed: onCreateWorldFeed,
-                              onCreateInteractiveTheater:
-                                  onCreateInteractiveTheater,
                               onOpenToolResult: onOpenToolResult,
                               onOpenFanficResult: onOpenFanficResult,
                             ),
@@ -389,7 +386,6 @@ class _StoryCluesTab extends StatelessWidget {
 
 enum _StoryExtraFilter {
   all,
-  interactive,
   fanfic,
   diary,
   world,
@@ -405,7 +401,6 @@ class _StoryExtrasTab extends StatefulWidget {
     required this.onCreateFanfic,
     required this.onCreateNpcDiary,
     required this.onCreateWorldFeed,
-    required this.onCreateInteractiveTheater,
     required this.onOpenToolResult,
     required this.onOpenFanficResult,
   });
@@ -417,7 +412,6 @@ class _StoryExtrasTab extends StatefulWidget {
   final VoidCallback onCreateFanfic;
   final Future<void> Function(NpcProfile npc) onCreateNpcDiary;
   final Future<void> Function() onCreateWorldFeed;
-  final VoidCallback onCreateInteractiveTheater;
   final Future<void> Function(ToolResult result) onOpenToolResult;
   final Future<void> Function(FanficResult result) onOpenFanficResult;
 
@@ -444,13 +438,6 @@ class _StoryExtrasTabState extends State<_StoryExtrasTab> {
           spacing: 10,
           runSpacing: 10,
           children: <Widget>[
-            FilledButton.icon(
-              onPressed: widget.isGenerating
-                  ? null
-                  : widget.onCreateInteractiveTheater,
-              icon: const Icon(Icons.touch_app_outlined),
-              label: Text(AppTheme.glitchText('互动小剧场')),
-            ),
             OutlinedButton.icon(
               onPressed: widget.isGenerating ? null : widget.onCreateFanfic,
               icon: const Icon(Icons.menu_book_outlined),
@@ -507,7 +494,6 @@ class _StoryExtrasTabState extends State<_StoryExtrasTab> {
   String _filterLabel(_StoryExtraFilter value) {
     return switch (value) {
       _StoryExtraFilter.all => '全部',
-      _StoryExtraFilter.interactive => '互动小剧场',
       _StoryExtraFilter.fanfic => '同人文',
       _StoryExtraFilter.diary => 'NPC 日记',
       _StoryExtraFilter.world => '世界动态',
@@ -604,7 +590,6 @@ class _StoryArtifactEntry {
 
   factory _StoryArtifactEntry.tool(ToolResult result) {
     final filter = switch (result.toolId) {
-      'interactive_theater' => _StoryExtraFilter.interactive,
       'npc_diary' => _StoryExtraFilter.diary,
       'world_feed' || 'forum_burst' || 'rumor_board' => _StoryExtraFilter.world,
       _ => _StoryExtraFilter.legacy,
@@ -612,7 +597,6 @@ class _StoryArtifactEntry {
     return _StoryArtifactEntry(
       title: result.toolTitle,
       subtitle: switch (filter) {
-        _StoryExtraFilter.interactive => '独立互动番外',
         _StoryExtraFilter.diary => 'NPC 日记',
         _StoryExtraFilter.world => '世界动态',
         _ => '旧版剧情工具记录',

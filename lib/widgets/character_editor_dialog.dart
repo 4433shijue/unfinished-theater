@@ -1,3 +1,5 @@
+import '../models/inline_theater_settings.dart';
+import 'inline_theater_settings_editor.dart';
 import 'dart:math' as math;
 import 'dart:convert';
 
@@ -54,6 +56,7 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
   late double _temperature;
   late double _topP;
   late int _contextLengthIndex;
+  late InlineTheaterSettings _inlineTheaterSettings;
   late bool _streamingOutputEnabled;
   late bool _segmentedOutputEnabled;
   late bool _nextStepOptionsEnabled;
@@ -94,6 +97,8 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
     _temperature = params.temperature;
     _topP = params.topP;
     _contextLengthIndex = _resolveContextLengthIndex(params.contextLength);
+    _inlineTheaterSettings =
+        initial?.inlineTheaterSettings ?? const InlineTheaterSettings();
     _streamingOutputEnabled = initial?.streamingOutputEnabled ?? true;
     _segmentedOutputEnabled = initial?.segmentedOutputEnabled ?? false;
     _nextStepOptionsEnabled = initial?.nextStepOptionsEnabled ?? true;
@@ -302,6 +307,13 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
                   },
                 ),
                 const SizedBox(height: 18),
+                InlineTheaterSettingsEditor(
+                  value: _inlineTheaterSettings,
+                  available: !_largeGroupChatModeEnabled &&
+                      !(widget.initialCharacter?.isTutorialDemo ?? false),
+                  onChanged: (value) =>
+                      setState(() => _inlineTheaterSettings = value),
+                ),
                 SwitchListTile(
                   value: _streamingOutputEnabled,
                   onChanged: (value) {
@@ -603,10 +615,11 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
                           AppTheme.glitchText(
                             '正在生成…（已输出 ${liveText.length} 字）',
                           ),
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: AppTheme.textWeak,
-                                fontWeight: FontWeight.w800,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: AppTheme.textWeak,
+                                    fontWeight: FontWeight.w800,
+                                  ),
                         ),
                       ),
                     ],
@@ -1272,6 +1285,7 @@ $rawPrompt
         hiddenPrompt: _isPromptLocked
             ? widget.initialCharacter!.hiddenPrompt
             : simulatorRuntimeProtocolPrompt,
+        inlineTheaterSettings: _inlineTheaterSettings,
         streamingOutputEnabled: _streamingOutputEnabled,
         segmentedOutputEnabled: _segmentedOutputEnabled,
         nextStepOptionsEnabled: _nextStepOptionsEnabled,

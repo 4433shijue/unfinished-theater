@@ -1,3 +1,6 @@
+import '../models/inline_theater_settings.dart';
+import '../services/inline_theater_contract.dart';
+import '../services/narrative_content.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -18,7 +21,6 @@ import '../models/fanfic_result.dart';
 import '../models/game_state.dart';
 import '../models/gameplay_system.dart';
 import '../models/gamification.dart';
-import '../models/interactive_theater.dart';
 import '../models/map_state.dart';
 import '../models/npc_migration.dart';
 import '../models/npc_profile.dart';
@@ -1600,7 +1602,7 @@ ${_formatWorldBooksForPrompt(character.id)}
 ${memory.summaries.map((item) => '- ${item.summaryText}').take(8).join('\n')}
 
 最近剧情：
-${history.messages.reversed.take(12).toList().reversed.map((message) => '${message.role.name}: ${message.content}').join('\n\n')}
+${history.messages.reversed.take(12).toList().reversed.map((message) => '${message.role.name}: ${MessageContentParser.contextTextForModel(message.content)}').join('\n\n')}
 ''',
         temperature: 0.55,
         topP: 0.9,
@@ -3678,6 +3680,7 @@ ${userNote.trim().isEmpty ? '' : '用户补充：${userNote.trim()}'}
       hiddenPrompt: _resolveHiddenPrompt(draft.hiddenPrompt),
       description: draft.description.trim(),
       openingMessage: draft.openingMessage.trim(),
+      inlineTheaterSettings: draft.inlineTheaterSettings,
       streamingOutputEnabled: draft.streamingOutputEnabled,
       segmentedOutputEnabled: draft.largeGroupChatModeEnabled
           ? false
@@ -4794,6 +4797,7 @@ $instruction
       hiddenPrompt: sourceCharacter.hiddenPrompt,
       presetId: null,
       isPromptLocked: sourceCharacter.isPromptLocked,
+      inlineTheaterSettings: sourceCharacter.inlineTheaterSettings,
       streamingOutputEnabled: sourceCharacter.streamingOutputEnabled,
       segmentedOutputEnabled: sourceCharacter.segmentedOutputEnabled,
       nextStepOptionsEnabled: sourceCharacter.nextStepOptionsEnabled,
@@ -4918,6 +4922,7 @@ $instruction
           : _resolveHiddenPrompt(draft.hiddenPrompt),
       description: draft.description.trim(),
       openingMessage: draft.openingMessage.trim(),
+      inlineTheaterSettings: draft.inlineTheaterSettings,
       streamingOutputEnabled: draft.streamingOutputEnabled,
       segmentedOutputEnabled:
           nextLargeGroupChatModeEnabled ? false : draft.segmentedOutputEnabled,
@@ -6155,7 +6160,9 @@ ${target.content}
           readList('characters', CharacterProfile.fromJson);
       final importedUserProfiles =
           readList('userProfiles', UserProfile.fromJson);
-      final importedToolResults = readList('toolResults', ToolResult.fromJson);
+      final importedToolResults = readList('toolResults', ToolResult.fromJson)
+          .where((r) => !r.isInteractiveTheater)
+          .toList();
       final importedFanficResults =
           readList('fanficResults', FanficResult.fromJson);
       final importedNpcProfiles = readList('npcProfiles', NpcProfile.fromJson);
@@ -7784,8 +7791,8 @@ ${const JsonEncoder.withIndent('  ').convert(structuredPlan)}
 1. 这是地图主线的正式下一回合，不是预演，不是旁支。
 2. 如果用户同时选择多个地点或行动，请按合理路线整合，不要机械逐条罗列。
 3. 如果计划冲突或时间不足，按用户给定顺序处理可完成部分，明确哪些未执行，不替用户编造关键取舍或额外行动。
-4. 必须更新当前时间、当前位置、事件记录、地点 HTML，以及可能变化的 NPC 印象、任务、背包或游戏面板。
-5. 继续输出可交互 HTML，并在 [MAP_STATE] JSON 中写回最新地图状态。
+4. 必须在独立状态协议中更新当前时间、当前位置、事件记录及 NPC 印象等真实变化；HTML 只放非正史番外。
+5. 按番外开关生成局部互动彩蛋，并在独立 [MAP_STATE] JSON 中写回最新地图状态。
 6. activeChoices 必须是用户下一步能直接点击的短行动，避免空泛预告。
 7. 优先读取“结构化行动计划 JSON”，不要只靠自然语言猜测用户意图；如果 JSON 与上方文字冲突，以 JSON 为准。
 ''';
@@ -8105,6 +8112,10 @@ ${choices.trim().isEmpty ? '暂无。' : choices}
       final assistantContent = '【地图主线｜$actionTitle】\n$visibleContent';
       final assistantMessage = ChatMessage(
         id: gameplayTurnId,
+        inlineTheaterThemeId: character.requiresHtmlPanel
+            ? character.inlineTheaterSettings.themeForTurn(
+                InlineTheaterSettings.completedTurns(previousHistory.messages))
+            : null,
         role: ChatRole.assistant,
         gameStateSnapshot: _gameplaySnapshot(
             nextGameState, character.gameplaySystem,
@@ -8756,321 +8767,6 @@ title, stage, mainGoal, locations, edges, spawnCandidates, mapInventory, quests,
   /// Generates a self-contained interactive extra. It only reads the current
   /// story snapshot; it never appends a user turn or runs the mainline state
   /// settlement pipeline.
-  Future<String?> generateInteractiveTheater({
-    required InteractiveTheaterRequest request,
-    void Function(String partial)? onChunk,
-  }) async {
-    final character = currentCharacter;
-    if (character == null) {
-      return '请先选择一个 AI 角色。';
-    }
-    if (!_settings.canChat) {
-      return '请先在设置页填好 API 地址、密钥和模型名称。';
-    }
-    if (_isSending) {
-      return '当前还有回复正在生成，请稍等。';
-    }
-    if (!request.isValid) {
-      return '至少选择一种小剧场玩法，或填写一段自定义提示词。';
-    }
-
-    final history = await _ensureHistory(character.id);
-    if (history.messages.isEmpty) {
-      return '当前还没有聊天记录，无法从故事生成小剧场。';
-    }
-
-    _isSending = true;
-    _lastToolResultId = null;
-    _ephemeralToolResult = null;
-    notifyListeners();
-
-    final buffer = StringBuffer();
-    try {
-      final memory = await _ensureMemory(character.id);
-      final gameState = await _ensureGameState(character.id);
-      final npcProfiles = worldNpcProfilesForCharacter(character.id);
-      await for (final chunk in _apiClient.streamContent(
-        settings: _settings,
-        systemPrompt: _interactiveTheaterSystemPrompt,
-        userPrompt: _buildInteractiveTheaterPrompt(
-          request: request,
-          character: character,
-          history: history,
-          memory: memory,
-          gameState: gameState,
-          npcProfiles: npcProfiles,
-        ),
-        temperature: 0.78,
-        topP: 0.92,
-        maxTokens: 8192,
-      )) {
-        buffer.write(chunk);
-        onChunk?.call(buffer.toString());
-      }
-
-      var content = buffer.toString().trim();
-      if (content.isEmpty) {
-        return '小剧场生成了空内容。';
-      }
-      content = await _repairInteractiveTheaterMarkup(content);
-      if (!_hasInteractiveTheaterMarkup(content)) {
-        return '模型没有按互动小剧场协议生成可点击内容，请重试一次。';
-      }
-      final toolResult = ToolResult(
-        id: IdGenerator.generic('theater'),
-        characterId: character.id,
-        toolId: 'interactive_theater',
-        toolTitle: request.displayTitle,
-        content: content,
-        createdAt: DateTime.now(),
-        interactiveTheater: true,
-        theaterSelectionMode: request.selectionMode.code,
-        theaterKinds:
-            request.kinds.map((kind) => kind.code).toList(growable: false),
-        theaterPrompt: request.customPrompt.trim(),
-      );
-      _toolResults.insert(0, toolResult);
-      _lastToolResultId = toolResult.id;
-      await _store.saveToolResults(_toolResults);
-      await _updateGamification(
-        (state) => state.incrementStat('totalToolResults'),
-        notify: false,
-      );
-      return null;
-    } on LlmApiException catch (error) {
-      return error.message;
-    } catch (error) {
-      return '互动小剧场生成失败：$error';
-    } finally {
-      _isSending = false;
-      notifyListeners();
-    }
-  }
-
-  /// Continues an existing extra from its local selection. The result keeps
-  /// the same artifact id, so reopening the story workspace shows the latest
-  /// stage while the main dialogue remains unchanged.
-  Future<String?> continueInteractiveTheater({
-    required ToolResult previous,
-    required List<String> selections,
-    void Function(String partial)? onChunk,
-  }) async {
-    final character = currentCharacter;
-    if (character == null) {
-      return '请先选择一个 AI 角色。';
-    }
-    if (!_settings.canChat) {
-      return '请先在设置页填好 API 地址、密钥和模型名称。';
-    }
-    if (_isSending) {
-      return '当前还有回复正在生成，请稍等。';
-    }
-    if (!previous.isInteractiveTheater ||
-        previous.characterId != character.id) {
-      return '这条内容不是当前故事里的互动小剧场。';
-    }
-
-    final cleanedSelections = selections
-        .map((item) => item.trim())
-        .where((item) => item.isNotEmpty)
-        .take(8)
-        .toList(growable: false);
-    if (previous.theaterSelectionMode == 'single' &&
-        cleanedSelections.length != 1) {
-      return '单选小剧场需要先选择一个选项。';
-    }
-    if (previous.theaterSelectionMode == 'multi' && cleanedSelections.isEmpty) {
-      return '多选小剧场至少选择一个选项。';
-    }
-
-    _isSending = true;
-    _lastToolResultId = previous.id;
-    notifyListeners();
-
-    final buffer = StringBuffer();
-    try {
-      await for (final chunk in _apiClient.streamContent(
-        settings: _settings,
-        systemPrompt: _interactiveTheaterSystemPrompt,
-        userPrompt: _buildInteractiveTheaterContinuationPrompt(
-          previous: previous,
-          selections: cleanedSelections,
-          character: character,
-        ),
-        temperature: 0.76,
-        topP: 0.92,
-        maxTokens: 8192,
-      )) {
-        buffer.write(chunk);
-        onChunk?.call(buffer.toString());
-      }
-
-      var content = buffer.toString().trim();
-      if (content.isEmpty) {
-        return '小剧场没有生成新的内容。';
-      }
-      content = await _repairInteractiveTheaterMarkup(content);
-      if (!_hasInteractiveTheaterMarkup(content)) {
-        return '这一幕没有生成可继续的互动内容，请重新点选一次。';
-      }
-      final updated = previous.copyWith(
-        content: content,
-        theaterStep: previous.theaterStep + 1,
-      );
-      final index = _toolResults.indexWhere((item) => item.id == previous.id);
-      if (index == -1) {
-        _toolResults.insert(0, updated);
-      } else {
-        _toolResults[index] = updated;
-      }
-      _lastToolResultId = updated.id;
-      await _store.saveToolResults(_toolResults);
-      return null;
-    } on LlmApiException catch (error) {
-      return error.message;
-    } catch (error) {
-      return '互动小剧场继续生成失败：$error';
-    } finally {
-      _isSending = false;
-      notifyListeners();
-    }
-  }
-
-  String _buildInteractiveTheaterPrompt({
-    required InteractiveTheaterRequest request,
-    required CharacterProfile character,
-    required DialogueHistory history,
-    required CharacterMemory memory,
-    required GameStateSnapshot gameState,
-    required List<NpcProfile> npcProfiles,
-  }) {
-    final recentMessages = history.messages.length > 18
-        ? history.messages.sublist(history.messages.length - 18)
-        : history.messages;
-    final memories = memory.summaries.reversed
-        .take(_settings.memoryContextItems <= 0
-            ? memory.summaries.length
-            : _settings.memoryContextItems)
-        .map((summary) => '- ${summary.summaryText}')
-        .join('\n');
-    final npcFacts = npcProfiles
-        .map(
-          (npc) =>
-              '- ${npc.name}（ID：${npc.id}）｜好感 ${npc.affinity}｜生命周期 ${npc.lifecycle.label}｜印象：${npc.impression.trim().isEmpty ? '暂无' : npc.impression.trim()}',
-        )
-        .join('\n');
-
-    return '''
-任务：为当前故事生成一段独立的互动番外小剧场。
-
-这是主线之外的可重玩内容。它可以从当前人物、关系和场景获得灵感，但不得推进主线，不得更新时间、地点、任务、物品、好感、NPC 生命周期、变量、长期记忆或剧情事实。用户在小剧场里做出的选择只属于这段番外。
-
-${request.toPrompt()}
-
-【HTML 互动协议】
-1. 只输出一个完整、可运行的单文件 HTML，放进一个 ```html 代码块；代码块外不要输出解释或 Markdown。
-2. 页面手机优先，自带 CSS，不引用外部图片、字体、CSS、JS 或网络资源，不写 script、onclick、href 或表单提交。
-3. 必须有一个主要互动区域：使用 `<div data-theater-group="main" data-choice-mode="${request.selectionMode.code}">` 包住选项。
-4. 每个可以被玩家选择的元素都使用 `<button type="button" data-theater-choice="稳定的短 id" data-theater-label="玩家看得懂的选项名">`。单选模式提供 3-5 个选项，多选模式提供 3-6 个选项。
-5. 页面必须有一个 `<button type="button" data-theater-submit="继续小剧场">`。它只提交当前小剧场的选择，不是主线行动。
-6. 选项文字要具体，点击后下一阶段要能产生人物反应、物件反馈、笑点或小结局。不要只做换颜色的装饰按钮。
-7. 交互结果要停在一小段完整反馈处，并保留一组新的选项或明确的收束，不要把玩家的选择写成主线已发生事实。
-
-【当前故事资料，只作人物与语境参考】
-AI 角色：${character.name}
-角色简介：
-${character.visibleBlurb}
-
-当前游戏面板：
-${gameState.isEmpty ? '暂无。' : _formatGameStateForPrompt(gameState)}
-
-NPC 档案：
-${npcFacts.trim().isEmpty ? '暂无。' : npcFacts}
-
-世界书：
-${_formatWorldBooksForPrompt(character.id)}
-
-长期记忆：
-${memories.trim().isEmpty ? '暂无。' : memories}
-
-最近聊天记录：
-${_formatTranscript(recentMessages)}
-''';
-  }
-
-  String _buildInteractiveTheaterContinuationPrompt({
-    required ToolResult previous,
-    required List<String> selections,
-    required CharacterProfile character,
-  }) {
-    final previousContent = previous.content.trim();
-    final clippedContent = previousContent.length > 18000
-        ? '${previousContent.substring(0, 18000)}\n[上一阶段 HTML 已截断]'
-        : previousContent;
-    final mode = previous.theaterSelectionMode == 'multi' ? 'multi' : 'single';
-    return '''
-任务：继续一段独立互动番外小剧场。
-
-当前 AI 角色：${character.name}
-小剧场原始玩法：${previous.theaterKinds.isEmpty ? '用户自定义' : previous.theaterKinds.join(', ')}
-互动模式：$mode
-用户本次选择：
-${selections.map((item) => '- $item').join('\n')}
-用户最初补充要求：${previous.theaterPrompt.trim().isEmpty ? '无' : previous.theaterPrompt.trim()}
-
-上一阶段 HTML：
-$clippedContent
-
-请根据用户本次选择继续这一段番外。保留已建立的人物口吻和现场关系，让选择产生一个具体的反馈、对白、发现、操作结果或小笑点。不要回到主线，不要把番外结果写入任何正式状态。
-
-输出规则：只输出一个完整单文件 HTML，并放进唯一的 ```html 代码块；不要输出解释、[CHOICES]、[GAME_STATE]、JSON 或代码块外正文。页面继续使用 data-theater-group、data-choice-mode="$mode"、data-theater-choice、data-theater-label 和 data-theater-submit。需要下一次互动时保留新的选项，不需要时给出完整收束按钮。不要写 script、onclick、外部资源或网络请求。
-''';
-  }
-
-  bool _hasInteractiveTheaterMarkup(String content) {
-    final normalized = content.toLowerCase();
-    return normalized.contains('data-theater-choice') &&
-        normalized.contains('data-theater-submit') &&
-        (normalized.contains('<html') || normalized.contains('<!doctype'));
-  }
-
-  Future<String> _repairInteractiveTheaterMarkup(String content) async {
-    if (_hasInteractiveTheaterMarkup(content)) {
-      return content;
-    }
-    final clipped = content.length > 18000
-        ? '${content.substring(0, 18000)}\n[原始结果已截断]'
-        : content;
-    try {
-      final repaired = await _apiClient.runUtilityTask(
-        settings: _settings,
-        systemPrompt: _interactiveTheaterRepairSystemPrompt,
-        userPrompt: '请把下面的结果修复成符合协议的完整 HTML：\n$clipped',
-        temperature: 0.12,
-        topP: 0.8,
-      );
-      final normalized = repaired.trim();
-      return normalized.isEmpty ? content : normalized;
-    } catch (_) {
-      return content;
-    }
-  }
-
-  static const String _interactiveTheaterSystemPrompt = '''
-你是 AI 角色扮演文字游戏里的互动番外导演。
-你负责把已有故事资料变成一段有具体人物反应、有操作反馈、可以在手机上直接玩的独立 HTML 小剧场。
-
-番外的创作自由只用于这段临时作品。不能把新增内容伪装成主线事实，不能替玩家写正式剧情里的行动，不能更新任何状态，不能输出内部协议说明。
-HTML 会在一个隔离的本地预览中运行。模型生成的脚本、事件属性、外链和网络请求都会被移除；互动必须依赖指定的 data-theater-* 属性。
-''';
-
-  static const String _interactiveTheaterRepairSystemPrompt = '''
-你只负责修复互动番外 HTML 的结构，不改写故事内容。
-只输出一个完整的单文件 HTML，放在唯一的 ```html 代码块中。
-保留已有正文和样式，补齐 data-theater-group、data-choice-mode、data-theater-choice、data-theater-label、data-theater-submit 属性。
-不要输出 script、onclick、href、外部资源、[CHOICES]、[GAME_STATE]、JSON 或代码块外解释。
-''';
-
   Future<String?> generateFanfic({
     required String pairingMode,
     required String firstParticipantId,
@@ -9257,7 +8953,7 @@ HTML 会在一个隔离的本地预览中运行。模型生成的脚本、事件
       title: '修复回复格式',
       replaceOriginal: true,
       instruction:
-          '只修复目标回复的格式错误，输出完整修复结果，不解释过程。补全 Markdown、HTML 代码围栏以及原有 [BUBBLE]、[CHOICES]、[GROUP_CHAT]、[GAME_STATE]、[THEATER_PATCH]、[MAP_STATE] 的结构和闭合标签。保留原文的协议模式、JSON 字段、ID、数值、数组顺序、变量补丁与承诺线程，不新增状态变化，不把群聊改成普通叙事，不把字段文本强行改成 JSON。正文只作必要的断行或转义修正；HTML 使用完整文档，已有行动按钮保留其含义并使用 data-prompt 或 data-action。',
+          '只修复目标回复的格式错误，输出完整修复结果，不解释过程。补全 Markdown、HTML 代码围栏以及原有 [BUBBLE]、[CHOICES]、[GROUP_CHAT]、[GAME_STATE]、[THEATER_PATCH]、[MAP_STATE] 的结构和闭合标签。保留原文的协议模式、JSON 字段、ID、数值、数组顺序、变量补丁与承诺线程，不新增状态变化，不把群聊改成普通叙事，不把字段文本强行改成 JSON。正文只作必要的断行或转义修正；HTML 番外使用完整文档，保留局部互动 data-extra-action / data-extra-target，不把它改成主线行动按钮。',
     );
   }
 
@@ -9599,11 +9295,19 @@ HTML 会在一个隔离的本地预览中运行。模型生成的脚本、事件
     _startStreamingSession(workingMessage.id);
     notifyListeners();
 
+    final themeId = target.inlineTheaterThemeId ??
+        character.inlineTheaterSettings.themeForTurn(
+            InlineTheaterSettings.completedTurns(
+                history.messages.take(targetIndex)));
     var committed = false;
     try {
       final result = await _apiClient.runUtilityTask(
         settings: _settings,
-        systemPrompt: _utilitySystemPrompt,
+        systemPrompt: _utilitySystemPrompt +
+            (replaceOriginal && character.requiresHtmlPanel
+                ? InlineTheaterContract.prompt(
+                    character.inlineTheaterSettings, themeId)
+                : ''),
         userPrompt: '''
 任务：$title
 
@@ -9613,7 +9317,7 @@ $instruction
 角色可见简介：
 ${character.visibleBlurb}
 
-目标回复：
+目标回复（其中 HTML 是非正史展示内容，不能写进正文或状态）：
 ${target.content}
 ''',
         temperature: 0.42,
@@ -9622,7 +9326,7 @@ ${target.content}
 
       final formatted =
           MessageContentParser.normalizeChoiceBlocks(result).trim();
-      final normalizedResult = replaceOriginal
+      var normalizedResult = replaceOriginal
           ? ReplyProtocolReconciler.mergeStateBlocks(
               primary: formatted,
               fallback: target.content,
@@ -9632,6 +9336,10 @@ ${target.content}
                       GameplayPatchParser.parseResult(target.content).found,
             )
           : GameStateParser.stripStateBlocks(formatted).trim();
+      if (replaceOriginal && !character.largeGroupChatModeEnabled) {
+        normalizedResult = InlineTheaterContract.finalize(normalizedResult,
+            enabled: character.requiresHtmlPanel, expectedTheme: themeId);
+      }
       if (normalizedResult.isEmpty) {
         throw const LlmApiException('没有生成可显示的格式修复结果。');
       }
@@ -10495,7 +10203,7 @@ ${_formatTranscript(recentMessages)}
   String _formatTranscript(Iterable<ChatMessage> messages) {
     return messages.map((message) {
       final speaker = message.role == ChatRole.user ? '用户' : 'AI';
-      return '$speaker：${message.content}';
+      return '$speaker：${MessageContentParser.contextTextForModel(message.content)}';
     }).join('\n\n');
   }
 
@@ -10766,7 +10474,7 @@ ${pendingMessages.map((message) => '- ${message.content}').join('\n')}
   }) {
     return messages.map((message) {
       final speaker = message.role == NpcMessageRole.user ? '用户角色' : npcName;
-      return '$speaker：${message.content}';
+      return '$speaker：${MessageContentParser.contextTextForModel(message.content)}';
     }).join('\n');
   }
 
@@ -11516,6 +11224,11 @@ messages 必须是 1-3 条简短手机聊天气泡。选一个 NPC 此刻有理�
     final history = await _ensureHistory(characterId);
     final message = ChatMessage(
       id: IdGenerator.message(),
+      inlineTheaterThemeId: role == ChatRole.assistant &&
+              (_findCharacter(characterId)?.requiresHtmlPanel ?? false)
+          ? _findCharacter(characterId)!.inlineTheaterSettings.themeForTurn(
+              InlineTheaterSettings.completedTurns(history.messages))
+          : null,
       role: role,
       content: trimmed,
       timestamp: DateTime.now(),
@@ -11557,7 +11270,7 @@ messages 必须是 1-3 条简短手机聊天气泡。选一个 NPC 此刻有理�
         .toList(growable: false)
         .reversed
         .map((message) =>
-            '${message.role == ChatRole.user ? '用户' : character.name}：${message.content}')
+            '${message.role == ChatRole.user ? '用户' : character.name}：${MessageContentParser.contextTextForModel(message.content)}')
         .join('\n\n');
     final memories = memory.summaries
         .take(8)
@@ -11575,8 +11288,9 @@ messages 必须是 1-3 条简短手机聊天气泡。选一个 NPC 此刻有理�
     return '''
 【地图输出协议｜最高优先级】
 以下内容是 App 的地图模式协议。地图任务必须同时输出主聊天可读长剧情、[GAME_STATE]${character.gameplaySystem == null ? '' : '、[THEATER_PATCH]'} 和 [MAP_STATE]，不要输出 [CHOICES]。
-每次地图任务必须输出：长剧情正文 -> 可选完整 ```html 代码块``` -> [GAME_STATE] 状态块${character.gameplaySystem == null ? '' : ' -> [THEATER_PATCH] 变量补丁'} -> [MAP_STATE] JSON 块。
-HTML 里的地点、时间和行动按钮必须使用 data-map-location、data-location-name、data-action 或 data-prompt，方便前端识别。
+每次地图任务必须输出：长剧情正文 -> ${character.requiresHtmlPanel ? '唯一互动番外 HTML' : '无 HTML'} -> [GAME_STATE] 状态块${character.gameplaySystem == null ? '' : ' -> [THEATER_PATCH] 变量补丁'} -> [MAP_STATE] JSON 块。
+${character.requiresHtmlPanel ? InlineTheaterContract.prompt(character.inlineTheaterSettings, character.inlineTheaterSettings.themeForTurn(InlineTheaterSettings.completedTurns(history.messages))) : '当前关闭番外，不输出 HTML。'}
+地图地点、行动和时间只写进 MAP_STATE，HTML 仅作为非正史番外。
 地图页会直接读取 [MAP_STATE] 里的 currentScene、activeChoices、locations、discoveredClues、npcPositions 和 npcMovements 展示主线，所以这些字段必须认真填写，不能只依赖 HTML。
 如果当前地图状态已有地点列表，locations 必须沿用旧 id/name，不能新增、删除、改名或替换大地点；只更新地点状态、NPC、线索、最近场景、推荐行动、风险和时间成本。
 仅旧版地图当前没有地点时首次生成 6-7 个大地点；新版规则地图必须沿用提供的蓝图和本地结算状态，不能按旧版数量裁剪地点。若本次要求含“规则权威边界”，它优先于这里允许 AI 更新状态的一般说明。
@@ -11784,46 +11498,57 @@ ${recentMessages.trim().isEmpty ? '暂无。' : recentMessages}
     required bool allowLocationReset,
     int minimumNarrativeChineseCharacters = 0,
   }) async {
-    final firstValidation = _validateMapResult(
-      previous: previous,
-      rawContent: originalResult,
-      allowLocationReset: allowLocationReset,
-      gameplayPatchRequired: character.gameplaySystem != null,
-      minimumNarrativeChineseCharacters: minimumNarrativeChineseCharacters,
-    );
-    if (firstValidation.isValid) {
-      return originalResult;
-    }
-
-    final repaired = await _apiClient.runUtilityTask(
-      settings: _settings,
-      systemPrompt: _mapRepairSystemPrompt,
-      userPrompt: _buildMapRepairPrompt(
-        character: character,
+    final history = await _ensureHistory(character.id);
+    final theme = character.inlineTheaterSettings
+        .themeForTurn(InlineTheaterSettings.completedTurns(history.messages));
+    _MapResultValidation validate(String value) => _validateMapResult(
         previous: previous,
-        originalPrompt: originalPrompt,
-        originalResult: originalResult,
-        validation: firstValidation,
+        rawContent: value,
         allowLocationReset: allowLocationReset,
-      ),
-      temperature: 0.12,
-      topP: 0.8,
-    );
-    final repairedResult = repaired.trim();
-    final repairedValidation = _validateMapResult(
-      previous: previous,
-      rawContent: repairedResult,
-      allowLocationReset: allowLocationReset,
-      gameplayPatchRequired: character.gameplaySystem != null,
-      minimumNarrativeChineseCharacters: minimumNarrativeChineseCharacters,
-    );
-    if (repairedValidation.isValid) {
-      return repairedResult;
+        gameplayPatchRequired: character.gameplaySystem != null,
+        minimumNarrativeChineseCharacters: minimumNarrativeChineseCharacters);
+    String finish(String value) => InlineTheaterContract.finalize(value,
+        enabled: character.requiresHtmlPanel, expectedTheme: theme);
+    final first = validate(originalResult);
+    final extraIssues = character.requiresHtmlPanel
+        ? InlineTheaterContract.validateReply(originalResult,
+            expectedTheme: theme)
+        : <String>[];
+    if (first.isValid && extraIssues.isEmpty) return finish(originalResult);
+    String repaired;
+    try {
+      repaired = (await _apiClient.runUtilityTask(
+              settings: _settings,
+              systemPrompt: _mapRepairSystemPrompt +
+                  (character.requiresHtmlPanel
+                      ? InlineTheaterContract.prompt(
+                          character.inlineTheaterSettings, theme)
+                      : '\n不要输出 HTML。'),
+              userPrompt: _buildMapRepairPrompt(
+                  character: character,
+                  previous: previous,
+                  originalPrompt: originalPrompt,
+                  originalResult: originalResult,
+                  validation:
+                      _MapResultValidation([...first.issues, ...extraIssues]),
+                  allowLocationReset: allowLocationReset),
+              temperature: 0.12,
+              topP: 0.8))
+          .trim();
+    } catch (_) {
+      if (first.isValid) return finish(originalResult);
+      rethrow;
     }
-
-    throw LlmApiException(
-      '地图生成失败：模型输出格式不完整，已保留旧地图和行动篮子。缺失：${repairedValidation.issues.join('、')}',
-    );
+    if (first.isValid) {
+      final docs = NarrativeContent.htmlDocuments(repaired);
+      final originalBody = NarrativeContent.withoutHtml(originalResult);
+      return finish(docs.length == 1
+          ? '$originalBody\n\n```html\n${docs.single}\n```'
+          : originalResult);
+    }
+    final checked = validate(repaired);
+    if (checked.isValid) return finish(repaired);
+    throw LlmApiException('地图生成失败：已保留旧地图和行动篮子。缺失：${checked.issues.join('、')}');
   }
 
   _MapResultValidation _validateMapResult({
@@ -11833,6 +11558,7 @@ ${recentMessages.trim().isEmpty ? '暂无。' : recentMessages}
     required bool gameplayPatchRequired,
     int minimumNarrativeChineseCharacters = 0,
   }) {
+    rawContent = NarrativeContent.withoutHtml(rawContent);
     final issues = <String>[];
     if (minimumNarrativeChineseCharacters > 0) {
       final narrative = GameStateParser.stripStateBlocks(
@@ -12049,6 +11775,7 @@ $originalResult
   }
 
   Map<String, dynamic> _extractMapStatePayload(String rawContent) {
+    rawContent = NarrativeContent.withoutHtml(rawContent);
     final match = RegExp(
       r'\[MAP_STATE\]([\s\S]*?)\[/MAP_STATE\]',
       caseSensitive: false,
@@ -12083,6 +11810,9 @@ $originalResult
   }
 
   String _extractFirstHtmlDocument(String rawContent) {
+    if (rawContent.contains('data-inline-theater')) {
+      return ''; // Extras never become map UI/state.
+    }
     final fenced = RegExp(
       r'```html\s*([\s\S]*?)```',
       caseSensitive: false,
@@ -12133,6 +11863,7 @@ $originalResult
   }
 
   List<MapLocationNode> _locationsFromHtml(String html) {
+    if (html.contains('data-inline-theater')) return const <MapLocationNode>[];
     if (html.trim().isEmpty) {
       return const <MapLocationNode>[];
     }
@@ -12709,7 +12440,16 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
     }
     final replyCancellation = LlmCancellationToken();
     _activeReplyCancellation = replyCancellation;
-    _historyCache[character.id] = replayOptimisticHistory;
+    final selectedTheme = character.requiresHtmlPanel
+        ? character.inlineTheaterSettings
+            .themeForTurn(InlineTheaterSettings.completedTurns(requestMessages))
+        : null;
+    _historyCache[character.id] = replayOptimisticHistory.copyWith(
+        messages: replayOptimisticHistory.messages
+            .map((message) => message.id == placeholderMessageId
+                ? message.copyWith(inlineTheaterThemeId: selectedTheme)
+                : message)
+            .toList());
     _startStreamingSession(placeholderMessageId);
     notifyListeners();
 
@@ -12781,6 +12521,7 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
           finalContent = await _repairAssistantReplyFormatIfNeeded(
             character: character,
             content: finalContent,
+            inlineTheaterThemeId: selectedTheme,
             requestMessages: replayRequestMessages,
             previousGameState: prepared.gameState,
             cancellationToken: replyCancellation,
@@ -12791,7 +12532,13 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
         }
       }
 
+      if (!character.largeGroupChatModeEnabled) {
+        finalContent = InlineTheaterContract.finalize(finalContent,
+            enabled: character.requiresHtmlPanel, expectedTheme: selectedTheme);
+      }
       final providerReplayExact = !_cancelCurrentReply &&
+          NarrativeContent.withoutHtml(rawProviderContent) ==
+              rawProviderContent.trim() &&
           finalContent == normalizedStreamContent &&
           rawProviderContent.isNotEmpty;
       final providerReplayContent =
@@ -12811,6 +12558,12 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
         providerReplayExact: providerReplayExact,
       );
 
+      finalHistory = finalHistory.copyWith(
+          messages: finalHistory.messages
+              .map((message) => message.id == placeholderMessageId
+                  ? message.copyWith(inlineTheaterThemeId: selectedTheme)
+                  : message)
+              .toList());
       var parsedGameState = _cancelCurrentReply
           ? null
           : GameStateParser.parseFromMessage(
@@ -13090,7 +12843,7 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
           previousState: previousGameState,
           npcProfiles: npcProfiles,
           latestUserMessage: latestUserMessage,
-          narrativeReply: GameStateParser.stripStateBlocks(content),
+          narrativeReply: MessageContentParser.contextTextForModel(content),
         ),
         temperature: 0.12,
         topP: 0.8,
@@ -13118,6 +12871,7 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
   Future<String> _repairAssistantReplyFormatIfNeeded({
     required CharacterProfile character,
     required String content,
+    String? inlineTheaterThemeId,
     required List<ChatMessage> requestMessages,
     required GameStateSnapshot previousGameState,
     required LlmCancellationToken cancellationToken,
@@ -13132,6 +12886,7 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
       gameplayPatchRequired: character.gameplaySystem != null,
       expectedChoiceCount: character.preferredChoiceCount,
       htmlRequired: character.requiresHtmlPanel,
+      inlineTheaterThemeId: inlineTheaterThemeId,
     );
     if (validation.isValid) {
       return normalized;
@@ -13149,7 +12904,17 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
       }
       final repairResult = await _apiClient.repairChatReplyFormat(
         settings: _settings,
-        character: character,
+        character: inlineTheaterThemeId == null
+            ? character
+            : character.copyWith(
+                inlineTheaterSettings: InlineTheaterSettings(
+                    enabled: true,
+                    mode: inlineTheaterThemeId == 'custom'
+                        ? InlineTheaterMode.custom
+                        : InlineTheaterMode.single,
+                    themeIds: [inlineTheaterThemeId],
+                    customPrompt:
+                        character.inlineTheaterSettings.customPrompt)),
         originalReply: normalized,
         latestUserMessage: latestUserMessage,
         gameState: previousGameState,
@@ -13171,11 +12936,19 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
         gameplayPatchRequired: character.gameplaySystem != null,
         expectedChoiceCount: character.preferredChoiceCount,
         htmlRequired: character.requiresHtmlPanel,
+        inlineTheaterThemeId: inlineTheaterThemeId,
       ).isValid) {
         return originalWithRepairedState;
       }
+      final repairedDocs = NarrativeContent.htmlDocuments(repairNormalized);
+      final onlyHtmlRepaired = repairedDocs.length == 1 &&
+              InlineTheaterContract.validateDocument(repairedDocs.single,
+                      expectedTheme: inlineTheaterThemeId)
+                  .isEmpty
+          ? '${NarrativeContent.withoutHtml(originalWithRepairedState)}\n\n```html\n${repairedDocs.single}\n```'
+          : originalWithRepairedState;
       final repairWithOriginalState = ReplyProtocolReconciler.mergeStateBlocks(
-        primary: repairNormalized,
+        primary: onlyHtmlRepaired,
         fallback: normalized,
         gameplayPatchRequired: character.gameplaySystem != null,
       );
@@ -13186,6 +12959,7 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
         gameplayPatchRequired: character.gameplaySystem != null,
         expectedChoiceCount: character.preferredChoiceCount,
         htmlRequired: character.requiresHtmlPanel,
+        inlineTheaterThemeId: inlineTheaterThemeId,
       ).isValid) {
         return repairWithOriginalState;
       }
@@ -13216,6 +12990,7 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
     required bool gameplayPatchRequired,
     required int expectedChoiceCount,
     required bool htmlRequired,
+    String? inlineTheaterThemeId,
   }) {
     final mode = largeGroupChatMode
         ? ReplyProtocolMode.largeGroupChat
@@ -13228,7 +13003,12 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
       expectedChoiceCount: expectedChoiceCount,
       htmlRequired: htmlRequired,
     );
-    return _ReplyFormatValidation(validation.issues);
+    return _ReplyFormatValidation([
+      ...validation.issues,
+      if (htmlRequired && !largeGroupChatMode)
+        ...InlineTheaterContract.validateReply(content,
+            expectedTheme: inlineTheaterThemeId),
+    ]);
   }
 
   String _applyLocalFormatFallbacks({
@@ -13253,10 +13033,7 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
       result = '本轮内容生成时没有返回可展示正文。';
     }
 
-    if (htmlRequired &&
-        !RegExp(r'```html[\s\S]*?```', caseSensitive: false).hasMatch(result)) {
-      result = '$result\n\n${_buildFallbackHtmlBlock(previousGameState)}';
-    }
+    result = InlineTheaterContract.finalize(result, enabled: htmlRequired);
 
     if (!RegExp(
       r'\[GAME_STATE\]\s*[\s\S]*?\s*\[/GAME_STATE\]',
@@ -13409,41 +13186,6 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
         !actualIndexes.asMap().entries.any(
               (entry) => entry.value != expectedIndexes[entry.key],
             );
-  }
-
-  String _buildFallbackHtmlBlock(GameStateSnapshot state) {
-    final time =
-        state.timeLabel.trim().isEmpty ? '当前回合' : state.timeLabel.trim();
-    final location =
-        state.location.trim().isEmpty ? '当前位置' : state.location.trim();
-    final task =
-        state.mainTask.trim().isEmpty ? '等待下一步行动' : state.mainTask.trim();
-
-    return '''
-```html
-<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body { margin: 0; font-family: system-ui, "Microsoft YaHei", sans-serif; background: #f7f7f8; color: #222; }
-    .card { padding: 16px; border: 1px solid #dedee3; background: #fff; border-radius: 8px; }
-    h2 { margin: 0 0 10px; font-size: 18px; }
-    p { margin: 8px 0; line-height: 1.6; }
-  </style>
-</head>
-<body>
-  <section class="card">
-    <h2>回合状态</h2>
-    <p>时间：$time</p>
-    <p>地点：$location</p>
-    <p>当前任务：$task</p>
-  </section>
-</body>
-</html>
-```
-''';
   }
 
   String _buildFallbackGameStateBlock(GameStateSnapshot state) {
@@ -14091,6 +13833,7 @@ F|做一个意外但仍合理的行动，打破当前僵局。
     }
 
     final history = await _store.loadDialogueHistory(characterId);
+    if (history.replayNeedsMigration) await _store.saveDialogueHistory(history);
     _historyCache[characterId] = history;
     return history;
   }
@@ -15398,7 +15141,8 @@ JSON 格式：
 - 世界书只写长期世界规则、程序允许提供的记忆事实和关系边界，不重复整张角色卡。把规则落到人物能做什么、受什么条件限制，不堆背景名词，不恢复被记忆策略隐藏的旧事。
 - 角色 sections 写身份、当前目标、说话方式、具体行为倾向和长期互动，不复制世界书或 App 协议。新世界可以创作，人物核心事实和关系硬约束不能改；开场用一件正在发生的小事让 NPC 行动，把玩家的关键回应留给玩家。
 - 如果 outputKind 是 worldBookOnly，character 必须为 null。
-- 如果 outputKind 是 newWorld，character 必须完整；openingMessage 包含可阅读正文、简短 HTML 状态卡、[GAME_STATE] 和 [CHOICES]。
+- 如果 outputKind 是 newWorld，character 必须完整；openingMessage 包含可阅读正文、非正史互动番外、[GAME_STATE] 和 [CHOICES]。番外主题固定 backstageChat，不展示任何状态数值。
+${InlineTheaterContract.rules}
 - 不得补写输入中没有提供的旧世界事实，不得提及“迁徙功能”“被用户带走”“旧 App 世界”。
 - 全部内容使用简体中文。
 ''';
@@ -17341,6 +17085,7 @@ ${NpcMigrationMemoryMode.label(memoryMode)}
   String _buildRuntimeAddendum(
     String characterId, {
     TurnDirective? directiveOverride,
+    Iterable<ChatMessage>? theaterHistoryOverride,
     GameStateSnapshot? gameStateOverride,
     GameplaySystem? gameplaySystemOverride,
   }) {
@@ -17356,6 +17101,15 @@ ${NpcMigrationMemoryMode.label(memoryMode)}
       );
     }
     final character = _findCharacter(characterId);
+    if (character != null && character.requiresHtmlPanel) {
+      final history = theaterHistoryOverride ??
+          _historyCache[characterId]?.messages ??
+          const <ChatMessage>[];
+      final themeId = character.inlineTheaterSettings
+          .themeForTurn(InlineTheaterSettings.completedTurns(history));
+      parts.add(InlineTheaterContract.prompt(
+          character.inlineTheaterSettings, themeId));
+    }
     final gameplaySystem = gameplaySystemOverride ?? character?.gameplaySystem;
     if (gameplaySystem != null) {
       parts.add(
@@ -17512,6 +17266,7 @@ ${NpcMigrationMemoryMode.label(memoryMode)}
     final runtimeAddendum = _buildRuntimeAddendum(
       character.id,
       directiveOverride: requestTurnDirective,
+      theaterHistoryOverride: messages,
       gameStateOverride: gameState,
       gameplaySystemOverride: character.gameplaySystem,
     );
@@ -17971,7 +17726,9 @@ ${NpcMigrationMemoryMode.label(memoryMode)}
 
     final characterIds = characters.map((character) => character.id).toSet();
     return source
-        .where((result) => characterIds.contains(result.characterId))
+        .where((result) =>
+            characterIds.contains(result.characterId) &&
+            !result.isInteractiveTheater)
         .toList(growable: false)
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
@@ -18753,7 +18510,7 @@ class _NpcMigrationCharacterPayload {
           : npc.impression.trim(),
       coreLoop: '每回合围绕二人的相处、关系推进、日常事件、旧世界回声和新世界任务展开。',
       stateSystem: '长期维护时间、地点、当前任务、关系进展、回忆碎片、情绪状态、重要物品和剧情记录。',
-      htmlRules: '每回合至少输出一个手机适配 HTML 面板，用于展示状态卡、关系卡、任务板、回忆碎片或事件卡。',
+      htmlRules: InlineTheaterContract.rules,
       choiceRules: '每回合底部输出 3-6 个行动选项，选项必须是用户下一步可执行的行为。',
       styleRules: '叙事采用$voice。故事主体只围绕玩家与${npc.name}展开，其他角色只能作为背景或推动关系的配角。',
       firstRoundRules: '第一回合展示抵达新世界后的场景，让用户决定如何确认关系和下一步行动，不替用户做选择。',

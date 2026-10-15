@@ -1,3 +1,4 @@
+import 'message_content_parser.dart';
 import 'dart:convert';
 
 import '../models/character_profile.dart';
@@ -119,8 +120,8 @@ ${jsonEncode(variables)}
 【已保存的承诺与余波】
 ${gameplay == null ? '' : GameplayPromptContext.consequences(previousState)}
 
-【本轮剧情正文与展示内容】
-$narrativeReply
+【本轮剧情正文（不含非正史番外）】
+${MessageContentParser.contextTextForModel(narrativeReply)}
 ''';
   }
 

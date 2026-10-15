@@ -254,7 +254,7 @@ class _AdjudicatingClient extends http.BaseClient {
       const story = '''
 雨停在车站外。你把伞递给陈放，他接过伞，提醒你到家后报个平安。
 ```html
-<div>车站 · 雨后</div>
+<html data-inline-theater="backstageChat"><body><details><summary>车站 · 雨后</summary>场外有人小声说：伞借出去了，人怎么还没走。</details></body></html>
 ```
 ''';
       final event = jsonEncode(<String, dynamic>{

@@ -1,3 +1,4 @@
+import 'narrative_content.dart';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -153,7 +154,8 @@ class MessageContentParser {
   }
 
   static ParsedMessageContent _parseStructuredUncached(String content) {
-    final groupMessages = parseGroupChatMessages(content);
+    final groupMessages =
+        parseGroupChatMessages(NarrativeContent.withoutHtml(content));
     final normalizedContent = _stripOpenGroupChatBlock(
       _stripAssistantMetaNarration(
         GameStateParser.stripStateBlocks(normalizeChoiceBlocks(content))
@@ -170,12 +172,13 @@ class MessageContentParser {
     }
 
     final extractedChoices = <MessageChoice>[];
-    final cleanedContent =
-        normalizedContent.replaceAllMapped(_choicesPattern, (match) {
-      final block = match.group(1) ?? '';
-      extractedChoices.addAll(_parseChoices(block));
-      return '';
-    });
+    final cleanedContent = NarrativeContent.transformOutsideHtml(
+        normalizedContent,
+        (canonical) => canonical.replaceAllMapped(_choicesPattern, (match) {
+              final block = match.group(1) ?? '';
+              extractedChoices.addAll(_parseChoices(block));
+              return '';
+            }));
 
     final segments = _parseSegments(cleanedContent);
     final blocks = segments.isEmpty
@@ -229,6 +232,7 @@ class MessageContentParser {
   }
 
   static String visibleStreamingText(String content) {
+    content = NarrativeContent.withoutHtml(content);
     var text = _stripAssistantMetaNarration(
       GameStateParser.stripStateBlocks(normalizeChoiceBlocks(content))
           .replaceAll(_groupChatPattern, ''),
@@ -253,6 +257,7 @@ class MessageContentParser {
   }
 
   static String contextTextForModel(String content) {
+    content = NarrativeContent.withoutHtml(content);
     var text = _stripAssistantMetaNarration(
       GameStateParser.stripStateBlocks(normalizeChoiceBlocks(content))
           .replaceAllMapped(_groupChatPattern, _groupChatReplaySummary),
@@ -570,7 +575,11 @@ class MessageContentParser {
     return '${clipped.trimRight()}\n\n[正文后段已省略]';
   }
 
-  static String normalizeChoiceBlocks(String content) {
+  static String normalizeChoiceBlocks(String content) =>
+      NarrativeContent.transformOutsideHtml(
+          content, _normalizeCanonicalChoiceBlocks);
+
+  static String _normalizeCanonicalChoiceBlocks(String content) {
     if (content.trim().isEmpty) {
       return content;
     }

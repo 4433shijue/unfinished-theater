@@ -1,3 +1,5 @@
+import 'inline_theater_settings.dart';
+import '../services/inline_theater_contract.dart';
 import 'model_params.dart';
 import 'gameplay_system.dart';
 
@@ -13,6 +15,7 @@ class CharacterProfile {
     this.hiddenPrompt = '',
     this.presetId,
     this.isPromptLocked = false,
+    this.inlineTheaterSettings = const InlineTheaterSettings(),
     this.streamingOutputEnabled = true,
     this.segmentedOutputEnabled = false,
     this.nextStepOptionsEnabled = true,
@@ -43,6 +46,8 @@ class CharacterProfile {
       hiddenPrompt: json['hiddenPrompt']?.toString() ?? '',
       presetId: json['presetId']?.toString(),
       isPromptLocked: json['isPromptLocked'] == true,
+      inlineTheaterSettings:
+          InlineTheaterSettings.fromJson(json['inlineTheaterSettings']),
       streamingOutputEnabled: json['streamingOutputEnabled'] != false,
       segmentedOutputEnabled: json['segmentedOutputEnabled'] == true,
       nextStepOptionsEnabled: json['nextStepOptionsEnabled'] != false,
@@ -78,6 +83,7 @@ class CharacterProfile {
   final String hiddenPrompt;
   final String? presetId;
   final bool isPromptLocked;
+  final InlineTheaterSettings inlineTheaterSettings;
   final bool streamingOutputEnabled;
   final bool segmentedOutputEnabled;
   final bool nextStepOptionsEnabled;
@@ -100,7 +106,10 @@ class CharacterProfile {
 
   int get preferredChoiceCount => isTutorialDemo ? 3 : 6;
 
-  bool get requiresHtmlPanel => !isTutorialDemo;
+  bool get requiresHtmlPanel =>
+      !isTutorialDemo &&
+      !largeGroupChatModeEnabled &&
+      inlineTheaterSettings.enabled;
 
   bool get isStoryBranch =>
       branchSourceCharacterId != null &&
@@ -173,7 +182,7 @@ class CharacterProfile {
 
     if (streamingOutputEnabled) {
       buffer.writeln(
-        '当前角色开启流式输出。正文可以逐步出现；HTML、CSS、JS 会在回复完成后再由前端渲染。',
+        '当前角色开启流式输出。正文可以逐步出现；完整闭合且通过检查的番外 HTML 会直接在正文下渲染；不要输出半截文档。',
       );
     } else {
       buffer.writeln(
@@ -227,7 +236,7 @@ class CharacterProfile {
       ..writeln('【结构标签底线】')
       ..writeln(mapModeEnabled
           ? '正式地图剧情回复不要退化成纯文本收尾；必须有正文、独立 [GAME_STATE] 状态块${gameplaySystem == null ? '' : '、独立 [THEATER_PATCH] 变量补丁'}和独立 [MAP_STATE] 状态块，不要输出 [CHOICES]。'
-          : '正式剧情回复不要退化成纯文本收尾；必须有正文、至少一个 ```html 代码块、独立 [GAME_STATE] 状态块，并按开关决定是否输出 [CHOICES]。')
+          : '正式剧情回复不要退化成纯文本收尾；必须有正文、${requiresHtmlPanel ? '一个互动番外 ```html 代码块、' : ''}独立 [GAME_STATE] 状态块，并按开关决定是否输出 [CHOICES]。')
       ..writeln('[GAME_STATE] 只给 App 解析，不能写进 HTML、Markdown 代码块、[BUBBLE] 或选项文字。')
       ..writeln(gameplaySystem == null
           ? ''
@@ -241,20 +250,11 @@ class CharacterProfile {
               : '[GAME_STATE] 必须完整闭合后输出 [THEATER_PATCH]；如果开启 [CHOICES]，[THEATER_PATCH] 必须完整闭合后才输出 [CHOICES]。')
       ..writeln('状态块至少包含：时间、地点、状态、当前任务、人物数据、关系网、剧情记录、NPC变化。')
       ..writeln()
-      ..writeln('【正文与 HTML 分工】')
-      ..writeln(
-          '剧情正文、人物心理、场景推进和对白必须优先用纯文字或 Markdown 正常呈现，不能全部塞进 HTML。纯文字剧情必须承担主要阅读体验。')
-      ..writeln(
-          '除剧情正文以外的功能型内容放进完整 ```html 代码块：论坛消息、小剧场吐槽、突发事件、公告栏、状态卡、任务板、关系网、地图、背包、新闻流等。')
-      ..writeln(mapModeEnabled
-          ? '地图模式的 HTML 资料卡为可选项，只在确实帮助阅读时提供；地图与行动建议仍由独立 [MAP_STATE] 维护。'
-          : '没有特殊资料时，给一个简短的状态卡或任务板就行。')
-      ..writeln('HTML 必须是单文件完整文档，适配手机屏幕，不引用外部资源。')
-      ..writeln(
-          '上述 HTML 要求是内部格式协议，不要在用户可见剧情正文里解释“HTML 状态面板、自包含、适配手机竖屏、代码块、用于本轮展示”等实现说明。')
-      ..writeln(mapModeEnabled
-          ? 'HTML 里的行动按钮如有点击行为，必须带 data-prompt 或 data-action；地图模式始终不输出 [CHOICES]。'
-          : 'HTML 里的行动按钮如有点击行为，必须带 data-prompt 或 data-action；它们不等同于 [CHOICES]，[CHOICES] 仍按开关规则放在整条回复最底部。');
+      ..writeln('剧情正文、人物心理、场景推进和对白用纯文字或 Markdown 呈现。HTML 番外不能替代正文。')
+      ..writeln(requiresHtmlPanel
+          ? InlineTheaterContract.rules
+          : '当前关闭每回合番外：不要输出 HTML 美化框，也不要补状态卡或任务板。')
+      ..writeln('GAME_STATE、THEATER_PATCH、MAP_STATE 只依据正文结算，与非正史番外严格分离。');
 
     return buffer.toString().trim();
   }
@@ -272,10 +272,10 @@ class CharacterProfile {
 【第一次开幕运行规则｜最高优先级】
 1. 这是面向普通玩家的短体验，不执行普通文游的 2000 字长篇规则。
 2. 用户可见正文保持 300-600 个中文字符；承接用户刚做的选择，用一个小场景或可见结果推进一个体验目标，不写产品说明书。
-3. HTML 资料卡不是必需；只有状态对比或步骤确实需要时才输出一个简短、适配手机的资料卡。
+3. 教程不输出 HTML 番外或状态资料卡，操作说明使用普通文字。
 4. 每轮必须维护独立 [GAME_STATE]，但绝不向用户解释这个内部标签。
 5. ${nextStepOptionsEnabled ? '只输出 A-C 三个上下文相关行动，不输出 D-F；其中一项应允许自由探索、换条路线或返回导览。' : '当前关闭下一步选项，不输出 [CHOICES] 或 A-F 建议行动，仍须维护 [GAME_STATE]。'}
-6. 正文 -> 可选资料卡 -> [GAME_STATE]${nextStepOptionsEnabled ? ' -> [CHOICES]' : ''}。内部结构必须完整闭合。
+6. 正文 -> [GAME_STATE]${nextStepOptionsEnabled ? ' -> [CHOICES]' : ''}。内部结构必须完整闭合。
 7. 不替玩家决定关键行动、台词或内心结论。
 ''';
 
@@ -367,6 +367,7 @@ class CharacterProfile {
     String? hiddenPrompt,
     String? presetId,
     bool? isPromptLocked,
+    InlineTheaterSettings? inlineTheaterSettings,
     bool? streamingOutputEnabled,
     bool? segmentedOutputEnabled,
     bool? nextStepOptionsEnabled,
@@ -393,6 +394,8 @@ class CharacterProfile {
       hiddenPrompt: hiddenPrompt ?? this.hiddenPrompt,
       presetId: presetId ?? this.presetId,
       isPromptLocked: isPromptLocked ?? this.isPromptLocked,
+      inlineTheaterSettings:
+          inlineTheaterSettings ?? this.inlineTheaterSettings,
       streamingOutputEnabled:
           streamingOutputEnabled ?? this.streamingOutputEnabled,
       segmentedOutputEnabled:
@@ -429,6 +432,7 @@ class CharacterProfile {
       'hiddenPrompt': hiddenPrompt,
       'presetId': presetId,
       'isPromptLocked': isPromptLocked,
+      'inlineTheaterSettings': inlineTheaterSettings.toJson(),
       'streamingOutputEnabled': streamingOutputEnabled,
       'segmentedOutputEnabled': segmentedOutputEnabled,
       'nextStepOptionsEnabled': nextStepOptionsEnabled,
@@ -455,6 +459,7 @@ class CharacterDraft {
     this.description = '',
     this.openingMessage = '',
     this.hiddenPrompt = '',
+    this.inlineTheaterSettings = const InlineTheaterSettings(),
     this.streamingOutputEnabled = true,
     this.segmentedOutputEnabled = false,
     this.nextStepOptionsEnabled = true,
@@ -469,6 +474,7 @@ class CharacterDraft {
   final String description;
   final String openingMessage;
   final String hiddenPrompt;
+  final InlineTheaterSettings inlineTheaterSettings;
   final bool streamingOutputEnabled;
   final bool segmentedOutputEnabled;
   final bool nextStepOptionsEnabled;

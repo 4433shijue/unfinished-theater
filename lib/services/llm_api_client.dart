@@ -1,3 +1,6 @@
+import 'narrative_content.dart';
+import 'inline_theater_contract.dart';
+import '../models/inline_theater_settings.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -430,7 +433,7 @@ class LlmApiClient {
   }) async {
     final transcript = messages.map((message) {
       final speaker = message.role == ChatRole.user ? '用户' : character.name;
-      return '$speaker: ${message.content}';
+      return '$speaker: ${message.role == ChatRole.assistant ? MessageContentParser.contextTextForModel(message.content) : message.content}';
     }).join('\n');
 
     return _postChatCompletion(
@@ -881,9 +884,9 @@ $raw''',
         : character.nextStepOptionsEnabled
             ? '最后必须输出一个 [CHOICES] 选项块，正好 ${character.preferredChoiceCount} 行：A|行动文本 到 $lastChoice|行动文本。'
             : '当前角色关闭下一步选项，禁止输出 [CHOICES]。';
-    final htmlInstruction = character.requiresHtmlPanel && !mapMode
-        ? '2. 至少有一个完整 ```html 代码块```；如果原文没有 HTML，补一个简短状态卡。'
-        : '2. HTML 资料卡为可选项；原文没有时不要为了格式强行补充。';
+    final htmlInstruction = character.requiresHtmlPanel
+        ? '2. 补齐或修复唯一的可点击番外，保留正文与有效状态。\n${InlineTheaterContract.prompt(character.inlineTheaterSettings, character.inlineTheaterSettings.themeForTurn(0))}'
+        : '2. 当前模式不输出 HTML，也不要补状态卡。';
     final gameplayInstruction = character.gameplaySystem == null
         ? ''
         : '''
@@ -1104,7 +1107,7 @@ $originalReply
         message.providerReplayExact) {
       final providerReplay = message.providerReplayContent;
       if (providerReplay != null && providerReplay.isNotEmpty) {
-        return providerReplay;
+        return NarrativeContent.withoutHtml(providerReplay);
       }
     }
     final replay = message.promptReplayContent?.trim();
@@ -1112,7 +1115,9 @@ $originalReply
       if (isLatestUserMessage) {
         useCurrentEnvelope();
       }
-      return replay;
+      return message.role == ChatRole.assistant
+          ? NarrativeContent.withoutHtml(replay)
+          : replay;
     }
     if (message.role != ChatRole.assistant) {
       if (isLatestUserMessage && currentEnvelope.trim().isNotEmpty) {
@@ -1718,6 +1723,12 @@ $originalReply
         ..writeln(_formatGameState(gameState));
     }
 
+    if (character.requiresHtmlPanel && !runtimeAddendum.contains('本轮唯一主题ID：')) {
+      body.writeln(InlineTheaterContract.prompt(
+          character.inlineTheaterSettings,
+          character.inlineTheaterSettings.themeForTurn(
+              InlineTheaterSettings.completedTurns(contextMessages))));
+    }
     if (runtimeAddendum.trim().isNotEmpty) {
       body
         ..writeln()
@@ -1825,7 +1836,7 @@ $trimmed
       return '''
 【第一次开幕本轮提醒】
 1. 用户可见正文保持 300-600 个中文字符，只推进当前体验目标，不写功能清单或开发说明。
-2. 资料卡按需输出；没有明显对比信息时不要生成 HTML。
+2. 教程不生成 HTML 番外或状态资料卡。
 3. 必须维护独立 [GAME_STATE]，但不要在正文里解释内部标签。
 4. ${character.nextStepOptionsEnabled ? '最后只输出 A-C 三个上下文相关行动，其中一项允许自由探索、换路线或返回导览。' : '当前关闭下一步选项，不输出 [CHOICES] 或字母行动清单；正文保留自然的回应机会。'}
 5. 不输出 D-F，不使用 NPC1/NPC2/NPC3，不主动提及 HTML、JSON、Token、CORS、缓存或提示词协议。
@@ -1837,7 +1848,7 @@ ${character.gameplaySystem == null ? '' : '6. 玩法系统已启用，[GAME_STAT
       return '''
 【地图主线本轮回复格式提醒】
 1. 继续当前主线，写清玩家行动造成的可观察结果。正式剧情推进时纯文字正文不少于 2000 个中文字符，目标 2200-3200 个中文字符；通过行动、对话和处境变化展开，不反复解释同一种情绪。
-2. HTML 资料卡按需输出，没有新增展示信息时可省略。
+2. ${character.requiresHtmlPanel ? '输出一个非正史互动番外 HTML；禁止地图、任务或状态面板。' : '关闭番外，不输出 HTML。'}
 3. 必须输出独立且完整闭合的 [GAME_STATE] 状态块与 [MAP_STATE] JSON 块；不能放进 HTML、Markdown 围栏或气泡。沿用稳定的地点与行动 ID，地图结果以本轮实际发生的事实为准。
 ${character.gameplaySystem == null ? '' : '4. [GAME_STATE] 后必须输出独立 [THEATER_PATCH] JSON 块，再输出 [MAP_STATE]；只记录有事实依据的变量变化，无变化时 ops 为空。'}
 5. 不输出 [CHOICES]，下一步行动写入 [MAP_STATE].activeChoices，供行动篮子使用；不得替玩家选好下一步。
@@ -1859,7 +1870,7 @@ ${character.gameplaySystem == null ? '' : '4. [GAME_STATE] 后必须输出独立
 本轮仍按 App 格式完成，禁止只输出纯文本：
 1. 剧情正文：继续当前主线，不解释规则；正式剧情推进时纯文字正文不少于 2000 个中文字符，目标 2200-3200 个中文字符。
    - 从眼前的动作与处境接续。重要选择和关系变化展开写，重复过程适当概述；每段增加行动、信息或后果，不用同义句凑长度，不在结尾替人物总结道理。
-2. HTML：至少一个完整 ```html 代码块（放什么内容、怎么写，按隐藏协议执行）。
+2. ${character.requiresHtmlPanel ? 'HTML：唯一完整的非正史互动番外，按本轮主题和本地交互协议创作。' : '当前关闭番外，不输出 HTML。'}
 3. [GAME_STATE]：独立状态块，放在选项之前，不得写进 HTML、代码块、[BUBBLE] 或选项文字。
    - 至少包含：时间、地点、状态、当前任务、人物数据、关系网、剧情记录、NPC变化、NPC更新。
    - NPC变化只写面板文字；NPC更新使用稳定 npcId、名字、好感变化、印象、生命周期、生命周期原因和本轮真实主动消息。已有 NPC 禁止重写绝对好感。
@@ -1940,13 +1951,14 @@ ${character.nextStepOptionsEnabled ? '[CHOICES] 必须且只能包含 A、B、C 
         ..writeln(
             '[GAME_STATE] 和 [MAP_STATE] 不得写进 HTML、Markdown 代码块、[BUBBLE] 或选项文本里。')
         ..writeln(character.gameplaySystem == null
-            ? '最终顺序：正文 → 可选HTML代码块 → 可选[BUBBLE]段落 → [GAME_STATE] → [MAP_STATE]。'
-            : '最终顺序：正文 → 可选HTML代码块 → 可选[BUBBLE]段落 → [GAME_STATE] → [THEATER_PATCH] → [MAP_STATE]。');
+            ? '最终顺序：正文 → ${character.requiresHtmlPanel ? '互动番外HTML → ' : ''} 可选[BUBBLE]段落 → [GAME_STATE] → [MAP_STATE]。'
+            : '最终顺序：正文 → ${character.requiresHtmlPanel ? '互动番外HTML → ' : ''} 可选[BUBBLE]段落 → [GAME_STATE] → [THEATER_PATCH] → [MAP_STATE]。');
       return buffer.toString().trim();
     }
 
     buffer
-      ..writeln('按隐藏协议完整输出：可阅读正文 → ```html 代码块 → 独立 [GAME_STATE] 状态块。')
+      ..writeln(
+          '按隐藏协议完整输出：可阅读正文 → ${character.requiresHtmlPanel ? '互动番外 HTML → ' : ''}独立 [GAME_STATE] 状态块。')
       ..writeln('正文先按轻小说写足，不少于 2000 个中文字符；HTML、状态块和选项不计入正文长度。')
       ..writeln('[GAME_STATE] 不得写进 HTML、Markdown 代码块、[BUBBLE] 或选项文本里。');
 
@@ -1954,14 +1966,14 @@ ${character.nextStepOptionsEnabled ? '[CHOICES] 必须且只能包含 A、B、C 
       buffer
         ..writeln('最后必须输出一个且只能输出一个 [CHOICES] 选项块，格式为 A|行动文本 到 F|行动文本。')
         ..writeln(character.gameplaySystem == null
-            ? '最终顺序：正文 → HTML代码块 → 可选[BUBBLE]段落 → [GAME_STATE] → [CHOICES]。'
-            : '最终顺序：正文 → HTML代码块 → 可选[BUBBLE]段落 → [GAME_STATE] → [THEATER_PATCH] → [CHOICES]。');
+            ? '最终顺序：正文 → ${character.requiresHtmlPanel ? '互动番外HTML → ' : ''} 可选[BUBBLE]段落 → [GAME_STATE] → [CHOICES]。'
+            : '最终顺序：正文 → ${character.requiresHtmlPanel ? '互动番外HTML → ' : ''} 可选[BUBBLE]段落 → [GAME_STATE] → [THEATER_PATCH] → [CHOICES]。');
     } else {
       buffer
         ..writeln('当前角色关闭下一步选项，所以不要输出 [CHOICES]。')
         ..writeln(character.gameplaySystem == null
-            ? '最终顺序：正文 → HTML代码块 → 可选[BUBBLE]段落 → [GAME_STATE]。'
-            : '最终顺序：正文 → HTML代码块 → 可选[BUBBLE]段落 → [GAME_STATE] → [THEATER_PATCH]。');
+            ? '最终顺序：正文 → ${character.requiresHtmlPanel ? '互动番外HTML → ' : ''} 可选[BUBBLE]段落 → [GAME_STATE]。'
+            : '最终顺序：正文 → ${character.requiresHtmlPanel ? '互动番外HTML → ' : ''} 可选[BUBBLE]段落 → [GAME_STATE] → [THEATER_PATCH]。');
     }
 
     return buffer.toString().trim();

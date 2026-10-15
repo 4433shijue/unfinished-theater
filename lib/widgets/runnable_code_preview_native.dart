@@ -1,3 +1,4 @@
+import '../services/html_interaction_bridge.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:math';
 
@@ -13,8 +14,10 @@ class RunnableCodePreview extends StatefulWidget {
     required this.document,
     required this.height,
     this.onAction,
+    this.interactionPolicy = HtmlInteractionPolicy.actions,
   });
 
+  final HtmlInteractionPolicy interactionPolicy;
   final String document;
   final double height;
   final ValueChanged<String>? onAction;
@@ -50,7 +53,8 @@ class _RunnableCodePreviewState extends State<RunnableCodePreview> {
         'AiRoleplayBridge',
         onMessageReceived: (message) {
           final value = message.message.trim();
-          if (value.isNotEmpty) {
+          if (value.isNotEmpty &&
+              widget.interactionPolicy == HtmlInteractionPolicy.actions) {
             widget.onAction?.call(value);
           }
         },
@@ -62,7 +66,8 @@ class _RunnableCodePreviewState extends State<RunnableCodePreview> {
             if (url.startsWith('ai-roleplay-action:')) {
               final encoded = url.substring('ai-roleplay-action:'.length);
               final value = Uri.decodeComponent(encoded).trim();
-              if (value.isNotEmpty) {
+              if (value.isNotEmpty &&
+                  widget.interactionPolicy == HtmlInteractionPolicy.actions) {
                 widget.onAction?.call(value);
               }
               return NavigationDecision.prevent;
@@ -82,7 +87,8 @@ class _RunnableCodePreviewState extends State<RunnableCodePreview> {
   @override
   void didUpdateWidget(covariant RunnableCodePreview oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.document != widget.document) {
+    if (oldWidget.document != widget.document ||
+        oldWidget.interactionPolicy != widget.interactionPolicy) {
       _loadDocument();
     }
   }
@@ -120,85 +126,6 @@ class _RunnableCodePreviewState extends State<RunnableCodePreview> {
     );
   }
 
-  String _interactionBridge() {
-    if (widget.onAction == null) {
-      return '';
-    }
-
-    return '''
-(function () {
-  function send(payload) {
-    var value = JSON.stringify(payload);
-    if (window.AiRoleplayBridge && window.AiRoleplayBridge.postMessage) {
-      window.AiRoleplayBridge.postMessage(value);
-    } else {
-      window.location.href = 'ai-roleplay-action:' + encodeURIComponent(value);
-    }
-  }
-  function selectedItems() {
-    var elements = document.querySelectorAll('[data-theater-choice][data-theater-selected="true"]');
-    var values = [];
-    for (var i = 0; i < elements.length; i++) {
-      var element = elements[i];
-      values.push((element.getAttribute('data-theater-label') || element.textContent || '').trim());
-    }
-    return values;
-  }
-  function findTheaterChoice(target) {
-    if (!target || !target.closest) return null;
-    return target.closest('[data-theater-choice]');
-  }
-  function findTheaterSubmit(target) {
-    if (!target || !target.closest) return null;
-    return target.closest('[data-theater-submit]');
-  }
-  function findActionElement(target) {
-    if (!target || !target.closest) return null;
-    return target.closest('[data-prompt], [data-action], [data-ai-action], .rp-action, .rp-choice');
-  }
-  function actionText(element) {
-    return (element.getAttribute('data-prompt') ||
-      element.getAttribute('data-action') ||
-      element.getAttribute('data-ai-action') ||
-      element.textContent || '').trim();
-  }
-  document.addEventListener('click', function (event) {
-    var choice = findTheaterChoice(event.target);
-    if (choice) {
-      var group = choice.closest('[data-theater-group]') || document.body;
-      var mode = group.getAttribute('data-choice-mode') || 'single';
-      if (mode === 'single') {
-        var selected = group.querySelectorAll('[data-theater-choice][data-theater-selected="true"]');
-        for (var i = 0; i < selected.length; i++) {
-          selected[i].setAttribute('data-theater-selected', 'false');
-          selected[i].setAttribute('aria-pressed', 'false');
-          selected[i].classList.remove('is-selected');
-        }
-      }
-      var next = choice.getAttribute('data-theater-selected') !== 'true';
-      choice.setAttribute('data-theater-selected', next ? 'true' : 'false');
-      choice.setAttribute('aria-pressed', next ? 'true' : 'false');
-      choice.classList.toggle('is-selected', next);
-      event.preventDefault();
-      event.stopPropagation();
-      send({type: 'theater-selection', mode: mode, values: selectedItems()});
-      return;
-    }
-    var submit = findTheaterSubmit(event.target);
-    if (submit) {
-      event.preventDefault();
-      event.stopPropagation();
-      send({type: 'theater-submit', values: selectedItems()});
-      return;
-    }
-    var element = findActionElement(event.target);
-    if (!element) return;
-    var text = actionText(element);
-    if (!text) return;
-    event.preventDefault();
-    send({type: 'action', value: text});
-  }, true);
-})();
-''';
-  }
+  String _interactionBridge() =>
+      HtmlInteractionBridge.build(policy: widget.interactionPolicy);
 }

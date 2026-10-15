@@ -1,3 +1,4 @@
+import 'narrative_content.dart';
 import 'dart:convert';
 
 import '../models/game_state.dart';
@@ -11,7 +12,11 @@ class GameStateParser {
     caseSensitive: false,
   );
 
-  static String stripStateBlocks(String content) {
+  static String stripStateBlocks(String content) =>
+      NarrativeContent.transformOutsideHtml(
+          content, _stripCanonicalStateBlocks);
+
+  static String _stripCanonicalStateBlocks(String content) {
     var stripped = content.replaceAll(stateBlockPattern, '');
     stripped = stripped.replaceAll(
       RegExp(
@@ -141,7 +146,7 @@ class GameStateParser {
     required GameStateSnapshot previous,
   }) {
     // Pre-clean: strip CHOICES blocks so GAME_STATE inside them doesn't leak
-    final cleanedContent = content
+    final cleanedContent = NarrativeContent.withoutHtml(content)
         .replaceAll(RegExp(r'\[CHOICES\][\s\S]*?\[/CHOICES\]'), '')
         .replaceAll(RegExp(r'\[CHOICES\][\s\S]*$'), '');
 

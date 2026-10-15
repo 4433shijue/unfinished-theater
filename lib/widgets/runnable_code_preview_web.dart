@@ -1,3 +1,4 @@
+import '../services/html_interaction_bridge.dart';
 // ignore_for_file: deprecated_member_use, avoid_web_libraries_in_flutter
 
 import 'dart:async';
@@ -14,8 +15,10 @@ class RunnableCodePreview extends StatefulWidget {
     required this.document,
     required this.height,
     this.onAction,
+    this.interactionPolicy = HtmlInteractionPolicy.actions,
   });
 
+  final HtmlInteractionPolicy interactionPolicy;
   final String document;
   final double height;
   final ValueChanged<String>? onAction;
@@ -67,7 +70,8 @@ class _RunnableCodePreviewState extends State<RunnableCodePreview> {
   @override
   void didUpdateWidget(covariant RunnableCodePreview oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.document != widget.document) {
+    if (oldWidget.document != widget.document ||
+        oldWidget.interactionPolicy != widget.interactionPolicy) {
       _registerFactory();
     }
   }
@@ -144,92 +148,13 @@ class _RunnableCodePreviewState extends State<RunnableCodePreview> {
         return;
       }
       final value = data['value']?.toString().trim() ?? '';
-      if (value.isNotEmpty) {
+      if (value.isNotEmpty &&
+          widget.interactionPolicy == HtmlInteractionPolicy.actions) {
         widget.onAction?.call(value);
       }
     });
   }
 
-  String _interactionBridge(String bridgeId) {
-    if (widget.onAction == null) {
-      return '';
-    }
-
-    final escapedBridgeId = bridgeId.replaceAll("'", r"\'");
-    return '''
-(function () {
-  var bridgeId = '$escapedBridgeId';
-  function send(payload) {
-    window.parent.postMessage({
-      type: 'ai-roleplay-action',
-      id: bridgeId,
-      value: JSON.stringify(payload)
-    }, '*');
-  }
-  function selectedItems() {
-    var elements = document.querySelectorAll('[data-theater-choice][data-theater-selected="true"]');
-    var values = [];
-    for (var i = 0; i < elements.length; i++) {
-      var element = elements[i];
-      values.push((element.getAttribute('data-theater-label') || element.textContent || '').trim());
-    }
-    return values;
-  }
-  function findTheaterChoice(target) {
-    if (!target || !target.closest) return null;
-    return target.closest('[data-theater-choice]');
-  }
-  function findTheaterSubmit(target) {
-    if (!target || !target.closest) return null;
-    return target.closest('[data-theater-submit]');
-  }
-  function findActionElement(target) {
-    if (!target || !target.closest) return null;
-    return target.closest('[data-prompt], [data-action], [data-ai-action], .rp-action, .rp-choice');
-  }
-  function actionText(element) {
-    return (element.getAttribute('data-prompt') ||
-      element.getAttribute('data-action') ||
-      element.getAttribute('data-ai-action') ||
-      element.textContent || '').trim();
-  }
-  document.addEventListener('click', function (event) {
-    var choice = findTheaterChoice(event.target);
-    if (choice) {
-      var group = choice.closest('[data-theater-group]') || document.body;
-      var mode = group.getAttribute('data-choice-mode') || 'single';
-      if (mode === 'single') {
-        var selected = group.querySelectorAll('[data-theater-choice][data-theater-selected="true"]');
-        for (var i = 0; i < selected.length; i++) {
-          selected[i].setAttribute('data-theater-selected', 'false');
-          selected[i].setAttribute('aria-pressed', 'false');
-          selected[i].classList.remove('is-selected');
-        }
-      }
-      var next = choice.getAttribute('data-theater-selected') !== 'true';
-      choice.setAttribute('data-theater-selected', next ? 'true' : 'false');
-      choice.setAttribute('aria-pressed', next ? 'true' : 'false');
-      choice.classList.toggle('is-selected', next);
-      event.preventDefault();
-      event.stopPropagation();
-      send({type: 'theater-selection', mode: mode, values: selectedItems()});
-      return;
-    }
-    var submit = findTheaterSubmit(event.target);
-    if (submit) {
-      event.preventDefault();
-      event.stopPropagation();
-      send({type: 'theater-submit', values: selectedItems()});
-      return;
-    }
-    var element = findActionElement(event.target);
-    if (!element) return;
-    var text = actionText(element);
-    if (!text) return;
-    event.preventDefault();
-    send({type: 'action', value: text});
-  }, true);
-})();
-''';
-  }
+  String _interactionBridge(String bridgeId) => HtmlInteractionBridge.build(
+      policy: widget.interactionPolicy, webBridgeId: bridgeId);
 }
