@@ -4041,7 +4041,8 @@ ${userNote.trim().isEmpty ? '' : '用户补充：${userNote.trim()}'}
               preview.worldType,
               preview.narrativeVoice,
             )
-          : preview.openingMessage.trim(),
+          : InlineTheaterContract.finalize(preview.openingMessage.trim(),
+              enabled: true, expectedTheme: 'backstageChat'),
       avatarDataUri: npc.avatarDataUri,
       streamingOutputEnabled: true,
       segmentedOutputEnabled: sourceCharacter.segmentedOutputEnabled,
@@ -12294,7 +12295,7 @@ $events
 4. 仅旧版地图且尚无地点列表时，首次生成 6-7 个“大地点”。新版规则地图使用输入中已生成的完整蓝图，不受此旧版数量要求约束。大地点 id/name 之后长期锁定。
 5. 如果提示中已有地点列表，后续输出必须沿用所有旧地点 id/name，不能新增、删除、改名、替换大地点；只能更新 status、description、scene、npcs、clues、nextActions、riskLevel、timeCost。
 6. 新版规则地图只叙述本地已经结算的行动及后果；旧版地图按本次实际行动和已有规则推进，结果与代价须有因果依据。两种模式都不能替玩家追加决定。activeChoices 和 nextActions 是下一步计划，如“前往旧图书馆调查借阅记录”，不能写成已经执行。
-7. 每次输出必须包含可阅读的长剧情正文。围绕人物眼下的目标、遭遇和反应写，视角只呈现能知道的事；不把日志逐条扩写，不重复解释情绪。随后可附一个适配手机、不引用外部资源的单文件 HTML。
+7. 每次输出必须包含可阅读的长剧情正文。围绕人物眼下的目标、遭遇和反应写，视角只呈现能知道的事；不把日志逐条扩写，不重复解释情绪。随后按每回合番外开关与主题输出互动 HTML，不用状态卡或地图面板填充。
 8. 输出末尾必须同时给 App 独立 [GAME_STATE] 和 [MAP_STATE]。不要放进 HTML 里，也不要放进 Markdown 代码块里。
 9. [MAP_STATE] 是地图 UI 主数据。必须包含 currentLocationId、mainGoal、currentScene、locations、activeChoices、npcPositions、eventSummary。
 10. activeChoices 必须是 3-5 个能直接放入行动篮子的行动，不要写“继续探索”这种空泛选项；每个选项要有 kind、label、action、riskLevel、timeCost。
@@ -12308,7 +12309,7 @@ $events
 
 输出结构：
 先写给用户看的主线长剧情正文。
-然后可选输出 ```html ... ``` 完整 HTML。
+然后按每回合番外设置输出 ```html ... ``` 完整互动番外；关闭时不输出 HTML。
 然后输出 [GAME_STATE] 状态块。
 [GAME_STATE] 示例字段：
 时间：当前时间
@@ -12378,7 +12379,7 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
 
   static const String _mapRepairSystemPrompt = '''
 你是地图模式格式修复器，只修格式，不润色或补写剧情。以原任务及本地权威状态为准，保留 ID、数值、数组顺序和既有状态变化；未知事实不填成确定结论，修复建议行动不代表执行行动。
-必须输出完整修复后的回复：用户可读正文、可选 HTML、[GAME_STATE]、原任务要求的 [THEATER_PATCH]、[MAP_STATE]。
+必须输出完整修复后的回复：用户可读正文、按设置启用的互动番外 HTML、[GAME_STATE]、原任务要求的 [THEATER_PATCH]、[MAP_STATE]。
 不要解释修复过程，不要输出 Markdown 代码块包裹 JSON，不要新增或改名已锁定大地点。
 用户可见地点名、按钮、线索和动向必须是简体中文；英文 id 只能留在 id/currentLocationId/locationId 字段。
 [GAME_STATE] 必须包含时间、地点、状态、当前任务、人物数据、剧情物品栏、关系网、剧情记录、NPC变化、NPC更新。
@@ -16247,28 +16248,20 @@ ${recentTranscript.trim().isEmpty ? '暂无。' : recentTranscript.trim()}
     String narrativeVoice,
   ) {
     final place = worldType.trim().isEmpty ? '这个新世界' : worldType.trim();
-    final voice = _npcMigrationNarrativeVoiceLabel(narrativeVoice);
+    final extra = InlineTheaterTheme.backstageChat.exampleHtml
+        .replaceAll('散场后的匿名群', '开场前的匿名群')
+        .replaceAll('雨停以后，还有一点没说完的小事。', '假如新世界也有一间场外休息室……')
+        .replaceAll('主持人：今天谁又把伞落下了？', '主持人：欢迎新来的，先来个自我介绍？')
+        .replaceAll(
+            '某人撤回：其实我是故意等她的。', '${_htmlEscape(npc.name)}撤回：这段开场白我练了好多遍。')
+        .replaceAll('旁观者：两位，群里还坐着我。', '场务：别紧张，刚才那句不算正式开场。');
     return '''
 门合上的声音很轻，像旧世界终于把最后一阵风留在身后。
 
 ${npc.name}站在$place的第一束光里，回头看向你。那些没说完的话、没来得及确认的眼神，都像被重新放回掌心。
 
 ```html
-<!doctype html>
-<html lang="zh-CN">
-<meta charset="utf-8">
-<style>
-body{margin:0;font-family:system-ui,"Microsoft YaHei",sans-serif;background:linear-gradient(135deg,#f8f5ef,#edf4ef);color:#2f3038}
-.card{padding:18px;border:1px solid rgba(96,118,100,.28);border-radius:18px;background:rgba(255,255,255,.78)}
-h3{margin:0 0 10px;font-size:18px}.tag{display:inline-block;margin:4px 6px 0 0;padding:5px 10px;border-radius:999px;background:#e1eee3;color:#607664;font-weight:700}
-</style>
-<div class="card">
-<h3>你们的新世界</h3>
-<p>地点：$place</p>
-<p>叙事：$voice</p>
-<span class="tag">只属于你们</span><span class="tag">前尘延续</span><span class="tag">文游开局</span>
-</div>
-</html>
+$extra
 ```
 
 [GAME_STATE]

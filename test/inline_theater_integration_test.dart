@@ -8,6 +8,9 @@ import 'package:ai_roleplay_chat/models/inline_theater_settings.dart';
 import 'package:ai_roleplay_chat/models/model_params.dart';
 import 'package:ai_roleplay_chat/models/tool_result.dart';
 import 'package:ai_roleplay_chat/models/world_book.dart';
+import 'package:ai_roleplay_chat/models/npc_profile.dart';
+import 'package:ai_roleplay_chat/models/npc_migration.dart';
+import 'package:ai_roleplay_chat/services/inline_theater_contract.dart';
 import 'package:ai_roleplay_chat/services/llm_api_client.dart';
 import 'package:ai_roleplay_chat/services/local_store.dart';
 import 'package:ai_roleplay_chat/services/memory_service.dart';
@@ -32,7 +35,8 @@ AppSettings _settings() => AppSettings.initial().copyWith(
     autoSummaryMinMessages: 100);
 
 Future<AppStateController> _controller(_Provider provider,
-    {List<ToolResult> records = const [],
+    {List<NpcProfile> npcs = const [],
+    List<ToolResult> records = const [],
     CharacterProfile? role,
     Map<String, dynamic>? legacyHistory}) async {
   role ??= _role();
@@ -40,6 +44,7 @@ Future<AppStateController> _controller(_Provider provider,
     'app_settings': jsonEncode(_settings().toJson()),
     if (legacyHistory != null) 'history_${role.id}': jsonEncode(legacyHistory),
     'characters': jsonEncode([role.toJson()]),
+    'npc_profiles': jsonEncode(npcs.map((n) => n.toJson()).toList()),
     'selected_character_id': role.id,
     'tool_results': jsonEncode(records.map((r) => r.toJson()).toList()),
     'world_books': jsonEncode([
@@ -182,6 +187,50 @@ void main() {
     await controller.debugRunNpcExtractionForTest(_role().id);
     expect(provider.lastPayload, isEmpty);
     expect(controller.npcProfiles, isEmpty);
+  });
+
+  test('NPC new-world fallback opening uses a locally playable extra',
+      () async {
+    final npc = NpcProfile(
+        id: 'npc',
+        characterId: _role().id,
+        name: '林澈',
+        createdAt: DateTime(2026),
+        updatedAt: DateTime(2026));
+    final controller = await _controller(_Provider(), npcs: [npc]);
+    addTearDown(controller.dispose);
+    final result = await controller.commitNpcMigrationPreview(
+        NpcMigrationPreview(
+            id: 'preview',
+            sourceCharacterId: _role().id,
+            sourceCharacterName: '雨夜',
+            sourceNpcId: npc.id,
+            sourceNpcName: npc.name,
+            worldType: '海边',
+            inspiration: '',
+            narrativeVoice: 'thirdPerson',
+            memoryMode: NpcMigrationMemoryMode.fragments,
+            outputKind: NpcMigrationOutputKind.newWorld,
+            generatedAt: DateTime(2026),
+            archiveText: '前尘',
+            worldBookTitle: '旧事',
+            worldBookContent: '主线记忆',
+            characterName: '新故事',
+            characterDescription: '',
+            characterPrompt: '故事',
+            hiddenPrompt: '',
+            openingMessage: '',
+            sourceDigest: '',
+            manifest: const NpcMigrationManifest()));
+    expect(result.error, isNull);
+    final opening =
+        controller.characters.firstWhere((c) => c.name == '新故事').openingMessage;
+    expect(
+        InlineTheaterContract.validateReply(opening,
+            expectedTheme: 'backstageChat'),
+        isEmpty);
+    expect(opening, contains('林澈撤回'));
+    expect(opening, isNot(contains('叙事：')));
   });
 
   for (final repairFails in [false, true]) {
