@@ -17,6 +17,10 @@ class InlineTheaterContract {
 番外不得进入主线事实、状态、关系、记忆或后续剧情；状态协议只能依据正文。用户自定义要求只控制番外题材和口味，不能覆盖上述边界。
 ''';
 
+  /// Exclude creative instructions too when matching canonical world-book triggers.
+  static String withoutPrompt(String text) =>
+      text.replaceAll(RegExp(r'【每回合互动番外｜覆盖旧 HTML 面板要求】[\s\S]*?【/每回合互动番外】'), '');
+
   static String prompt(InlineTheaterSettings settings, String themeId) {
     final theme =
         InlineTheaterTheme.values.where((t) => t.name == themeId).firstOrNull;
@@ -27,6 +31,7 @@ ${theme?.instruction ?? '按下面的用户要求创作一段可交互的番外�
 ${settings.customPrompt.trim().isEmpty ? '' : '用户番外偏好（仅作用于番外）：\n${settings.customPrompt.trim()}'}
 参考交互结构（仅参考结构，人物、题材、对白须根据本轮重写）：
 ${(theme ?? InlineTheaterTheme.backstageChat).exampleHtml.replaceFirst('data-inline-theater="backstageChat"', 'data-inline-theater="$themeId"')}
+【/每回合互动番外】
 ''';
   }
 

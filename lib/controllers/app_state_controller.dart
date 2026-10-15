@@ -13697,6 +13697,7 @@ F|做一个意外但仍合理的行动，打破当前僵局。
   }
 
   bool _hasNpcExtractionSignal(String content) {
+    content = NarrativeContent.withoutHtml(content);
     if (content.trim().isEmpty) {
       return false;
     }
@@ -13718,7 +13719,9 @@ F|做一个意外但仍合理的行动，打破当前僵局。
   }
 
   Future<void> _loadCharacterState(String characterId) async {
-    _historyCache[characterId] = await _store.loadDialogueHistory(characterId);
+    final history = await _store.loadDialogueHistory(characterId);
+    if (history.replayNeedsMigration) await _store.saveDialogueHistory(history);
+    _historyCache[characterId] = history;
     _memoryCache[characterId] = await _store.loadCharacterMemory(characterId);
     var gameState = await _store.loadGameState(characterId);
     final gameplaySystem = _findCharacter(characterId)?.gameplaySystem;
@@ -15244,7 +15247,9 @@ JSON 格式：
           .map(
             (message) => <String, dynamic>{
               'role': message.role.name,
-              'content': _clipPromptText(message.content, 1600),
+              'content': _clipPromptText(
+                  MessageContentParser.contextTextForModel(message.content),
+                  1600),
               'timestamp': message.timestamp.toIso8601String(),
             },
           )
@@ -15283,7 +15288,9 @@ JSON 格式：
     final normalizedName = npcName.trim().toLowerCase();
     if (normalizedName.isNotEmpty) {
       for (final message in messages.reversed) {
-        if (message.content.toLowerCase().contains(normalizedName)) {
+        if (MessageContentParser.contextTextForModel(message.content)
+            .toLowerCase()
+            .contains(normalizedName)) {
           selected[message.id] = message;
         }
         if (selected.length >= 16) break;
@@ -16989,10 +16996,11 @@ ${NpcMigrationMemoryMode.label(memoryMode)}
     String extraText = '',
   }) {
     final parts = <String>[
-      ...contextMessages.reversed.take(8).map((message) => message.content),
+      ...contextMessages.reversed.take(8).map((message) =>
+          MessageContentParser.contextTextForModel(message.content)),
       if (gameState != null && !gameState.isEmpty)
         _formatGameStateForPrompt(gameState),
-      extraText,
+      InlineTheaterContract.withoutPrompt(extraText),
     ];
     return parts.join('\n').toLowerCase();
   }

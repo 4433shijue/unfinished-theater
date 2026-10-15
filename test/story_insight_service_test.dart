@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ai_roleplay_chat/models/inline_theater_settings.dart';
+import 'package:ai_roleplay_chat/services/inline_theater_contract.dart';
 
 import 'package:ai_roleplay_chat/models/chat_message.dart';
 import 'package:ai_roleplay_chat/models/game_state.dart';
@@ -41,9 +43,16 @@ void main() {
           timestamp: DateTime(2026),
           isSummarized: false,
         ),
+        ChatMessage(
+            id: 'extra',
+            role: ChatRole.assistant,
+            content: '仍在天台。<html><body>假如去了医务室</body></html>',
+            timestamp: DateTime(2026),
+            isSummarized: false),
       ],
       gameState: GameStateSnapshot.empty('char-1').copyWith(location: '天台'),
-      runtimeAddendum: '',
+      runtimeAddendum: InlineTheaterContract.prompt(
+          const InlineTheaterSettings(customPrompt: '番外在医务室'), 'backstageChat'),
     );
 
     expect(preview.first.title, '天台规则');

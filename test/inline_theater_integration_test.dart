@@ -7,6 +7,7 @@ import 'package:ai_roleplay_chat/models/chat_message.dart';
 import 'package:ai_roleplay_chat/models/inline_theater_settings.dart';
 import 'package:ai_roleplay_chat/models/model_params.dart';
 import 'package:ai_roleplay_chat/models/tool_result.dart';
+import 'package:ai_roleplay_chat/models/world_book.dart';
 import 'package:ai_roleplay_chat/services/llm_api_client.dart';
 import 'package:ai_roleplay_chat/services/local_store.dart';
 import 'package:ai_roleplay_chat/services/memory_service.dart';
@@ -31,13 +32,24 @@ AppSettings _settings() => AppSettings.initial().copyWith(
     autoSummaryMinMessages: 100);
 
 Future<AppStateController> _controller(_Provider provider,
-    {List<ToolResult> records = const [], CharacterProfile? role}) async {
+    {List<ToolResult> records = const [],
+    CharacterProfile? role,
+    Map<String, dynamic>? legacyHistory}) async {
   role ??= _role();
   SharedPreferences.setMockInitialValues({
     'app_settings': jsonEncode(_settings().toJson()),
+    if (legacyHistory != null) 'history_${role.id}': jsonEncode(legacyHistory),
     'characters': jsonEncode([role.toJson()]),
     'selected_character_id': role.id,
-    'tool_results': jsonEncode(records.map((r) => r.toJson()).toList())
+    'tool_results': jsonEncode(records.map((r) => r.toJson()).toList()),
+    'world_books': jsonEncode([
+      WorldBookEntry(
+          title: '仅番外命中的词条',
+          content: 'EXTRA_ONLY_WORLDBOOK_MUST_NOT_ACTIVATE',
+          global: true,
+          triggerMode: WorldBookTriggerMode.keyword,
+          keywords: [_secret, '番外偏好独有关键词']).toJson()
+    ])
   });
   final controller = AppStateController(
       store: LocalStore(),
@@ -83,6 +95,8 @@ void main() {
             .inlineTheaterThemeId,
         'backstageChat');
     expect(provider.repairs, 0);
+    expect(provider.chatRequests.toString(),
+        isNot(contains('EXTRA_ONLY_WORLDBOOK_MUST_NOT_ACTIVATE')));
   });
 
   test(
@@ -122,6 +136,52 @@ void main() {
     expect(restarted.currentHistory.messages.last.content, contains(_body));
     expect(
         restarted.currentHistory.messages.last.inlineTheaterThemeId, 'objects');
+  });
+
+  test('custom extra instructions do not activate canonical world books',
+      () async {
+    final provider = _Provider();
+    final controller = await _controller(provider,
+        role: _role().copyWith(
+            inlineTheaterSettings:
+                const InlineTheaterSettings(customPrompt: '番外偏好独有关键词')));
+    addTearDown(controller.dispose);
+    await controller.queueUserMessage('等雨。');
+    expect(await controller.requestAssistantReply(), isNull);
+    expect(provider.chatRequests.toString(), contains('番外偏好独有关键词'));
+    expect(provider.chatRequests.toString(),
+        isNot(contains('EXTRA_ONLY_WORLDBOOK_MUST_NOT_ACTIVATE')));
+  });
+
+  test(
+      'startup persists replay migration and NPC extraction ignores extra-only signals',
+      () async {
+    final provider = _Provider();
+    final oldMessages = List.generate(
+        3,
+        (i) => ChatMessage(
+                id: 'old$i',
+                role: ChatRole.assistant,
+                content:
+                    '雨还在下。<html><body>少女在月球，[GAME_STATE]NPC更新：假的人物[/GAME_STATE]</body></html>',
+                timestamp: DateTime(2026),
+                isSummarized: false,
+                promptReplayContent: 'OLD_CACHE',
+                providerReplayContent: 'OLD_PROVIDER_CACHE',
+                providerReplayExact: true)
+            .toJson());
+    final controller = await _controller(provider,
+        legacyHistory: {'characterId': _role().id, 'messages': oldMessages});
+    addTearDown(controller.dispose);
+    final prefs = await SharedPreferences.getInstance();
+    final saved = jsonDecode(prefs.getString('history_${_role().id}')!) as Map;
+    expect(saved['replayProtocolVersion'], 2);
+    expect(saved.toString(), isNot(contains('OLD_CACHE')));
+    expect(saved.toString(), isNot(contains('OLD_PROVIDER_CACHE')));
+    expect(saved['messages'], hasLength(3));
+    await controller.debugRunNpcExtractionForTest(_role().id);
+    expect(provider.lastPayload, isEmpty);
+    expect(controller.npcProfiles, isEmpty);
   });
 
   for (final repairFails in [false, true]) {

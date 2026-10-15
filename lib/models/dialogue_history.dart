@@ -49,6 +49,7 @@ class DialogueHistory {
     bool clearPromptCacheEpoch = false,
   }) {
     return DialogueHistory(
+      replayNeedsMigration: replayNeedsMigration,
       characterId: characterId ?? this.characterId,
       messages: messages ?? this.messages,
       promptCacheEpoch: clearPromptCacheEpoch

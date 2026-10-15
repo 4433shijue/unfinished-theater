@@ -1,3 +1,4 @@
+import 'inline_theater_contract.dart';
 import '../models/chat_message.dart';
 import '../models/game_state.dart';
 import '../models/map_state.dart';
@@ -354,7 +355,8 @@ class StoryInsightService {
     required String runtimeAddendum,
   }) {
     final haystack = <String>[
-      ...contextMessages.reversed.take(8).map((message) => message.content),
+      ...contextMessages.reversed.take(8).map((message) =>
+          MessageContentParser.contextTextForModel(message.content)),
       gameState.location,
       gameState.timeLabel,
       gameState.status,
@@ -362,7 +364,7 @@ class StoryInsightService {
       gameState.eventTitle,
       gameState.eventDescription,
       ...gameState.plotFlags,
-      runtimeAddendum,
+      InlineTheaterContract.withoutPrompt(runtimeAddendum),
     ].join('\n').toLowerCase();
     return entries
         .where((entry) =>
