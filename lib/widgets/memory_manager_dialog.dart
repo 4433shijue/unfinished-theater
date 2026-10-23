@@ -1,3 +1,4 @@
+import 'story_workbench.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -62,6 +63,10 @@ class _MemoryManagerDialog extends StatelessWidget {
                       ],
                     ),
                   ),
+                  IconButton(
+                      tooltip: '重要事实',
+                      icon: const Icon(Icons.push_pin_outlined),
+                      onPressed: () => showStoryContinuityDialog(context)),
                   IconButton(
                     tooltip: AppTheme.glitchText('新增记忆'),
                     onPressed:

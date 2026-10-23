@@ -29,6 +29,39 @@ class ReleaseNotes {
 }
 
 const ReleaseNotes currentReleaseNotes = ReleaseNotes(
+  id: 'v2.14.0',
+  version: 'V2.14.0',
+  title: 'V2.14.0 好好接住每一场戏',
+  subtitle: '精修一句话，记住重要事实，让人物只知道自己该知道的事。',
+  items: [
+    ReleaseNoteItem(
+        icon: Icons.auto_fix_high,
+        title: '选中一段，先看改写预览',
+        description: '主线、群聊与私聊都可精修和切换版本；涉及剧情变化时另开 IF 分支。'),
+    ReleaseNoteItem(
+        icon: Icons.push_pin_outlined,
+        title: '固定事实，确认冲突',
+        description: '重要设定不会被自动覆盖，可以区分记错了与剧情发生新变化。'),
+    ReleaseNoteItem(
+        icon: Icons.tune,
+        title: '导演偏好持续生效',
+        description: '为本回合、本场景或整个剧本设置节奏、对话、心理描写与篇幅。'),
+    ReleaseNoteItem(
+        icon: Icons.history_edu,
+        title: '接着上次演',
+        description: '接戏卡整理有来源的近况，主线与私聊分别恢复阅读位置，阅读旧内容时不会被新回复拉走。'),
+    ReleaseNoteItem(
+        icon: Icons.visibility_outlined,
+        title: '人物有各自的知情范围',
+        description: '区分亲见、被告知与怀疑；同一 NPC 在不同世界保有独立的关系和经历。'),
+    ReleaseNoteItem(
+        icon: Icons.menu_book_outlined,
+        title: '在这里收尾，写下这一章',
+        description: '生成自然收尾并保存章节，下一场的时间地点由你选择，也能重新打开当前场景。'),
+  ],
+);
+
+const ReleaseNotes _v2131ReleaseNotes = ReleaseNotes(
   id: 'v2.13.1',
   version: 'V2.13.1',
   title: 'V2.13.1 每回合都有小彩蛋',
@@ -1781,6 +1814,7 @@ const ReleaseNotes _v210ReleaseNotes = ReleaseNotes(
 
 const List<ReleaseNotes> releaseNotesHistory = <ReleaseNotes>[
   currentReleaseNotes,
+  _v2131ReleaseNotes,
   _v2130ReleaseNotes,
   _v2120ReleaseNotes,
   _v2111ReleaseNotes,

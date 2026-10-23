@@ -59,6 +59,11 @@ Future<void> showStoryInsightsDialog(
                             ),
                           ),
                           IconButton(
+                              tooltip: '连续记忆与章节',
+                              icon: const Icon(Icons.history_edu),
+                              onPressed: () =>
+                                  showStoryContinuityDialog(context)),
+                          IconButton(
                             tooltip: AppTheme.glitchText('关闭'),
                             onPressed: () => Navigator.of(dialogContext).pop(),
                             icon: const Icon(Icons.close_rounded),

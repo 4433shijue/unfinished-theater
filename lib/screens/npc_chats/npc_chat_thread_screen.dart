@@ -258,6 +258,7 @@ class _NpcChatThreadScreenState extends State<NpcChatThreadScreen> {
   Widget build(BuildContext context) {
     final controller = context.watch<AppStateController>();
     final npc = controller.npcProfileById(widget.npcId);
+    final worldId = controller.currentCharacter?.id;
     if (npc == null) {
       return Scaffold(
         backgroundColor: Colors.transparent,
@@ -342,6 +343,12 @@ class _NpcChatThreadScreenState extends State<NpcChatThreadScreen> {
                             icon: Icons.file_download_outlined,
                           ),
                           _NpcTopIconButton(
+                              tooltip: '知情范围',
+                              icon: Icons.visibility_outlined,
+                              onPressed: () => showStoryContinuityDialog(
+                                  context,
+                                  npcId: widget.npcId)),
+                          _NpcTopIconButton(
                             tooltip: '查看印象',
                             onPressed: () => _showImpressionSheet(npc),
                             icon: Icons.psychology_alt_outlined,
@@ -359,10 +366,19 @@ class _NpcChatThreadScreenState extends State<NpcChatThreadScreen> {
                           description: AppTheme.glitchText(
                               '先像手机聊天一样发送一两条气泡，再点小飞机让 NPC 回复。私聊不会推进主线。'),
                         )
-                      : ListView.separated(
+                      : StoryAnchoredList(
+                          key: ValueKey(
+                              '${controller.currentCharacter?.id}/${widget.npcId}'),
+                          ids: messages.map((m) => m.id).toList(),
+                          savedPosition: storyMap(controller.currentContinuity
+                              .reading['npc/${widget.npcId}']),
+                          onPosition: (id, fraction, leaving) {
+                            unawaited(controller.saveReadingPosition(
+                                'npc/${widget.npcId}', id, fraction,
+                                leaving: leaving, worldId: worldId));
+                          },
                           controller: _scrollController,
                           padding: const EdgeInsets.only(bottom: 8),
-                          itemCount: messages.length,
                           separatorBuilder: (_, __) =>
                               const SizedBox(height: 10),
                           itemBuilder: (context, index) {
@@ -371,6 +387,11 @@ class _NpcChatThreadScreenState extends State<NpcChatThreadScreen> {
                                 _selectedMessageIds.contains(message.id);
                             return _NpcMessageBubble(
                               message: message,
+                              onRewrite: message.role == NpcMessageRole.npc
+                                  ? (selection) => showStoryRewriteDialog(
+                                      context, message.id,
+                                      npcId: widget.npcId, selection: selection)
+                                  : null,
                               npcName: npc.name,
                               frameId: controller.currentBubbleFrameId,
                               customStyle: BubbleStyleSpec.fromCustom(
@@ -389,6 +410,23 @@ class _NpcChatThreadScreenState extends State<NpcChatThreadScreen> {
                           },
                         ),
                 ),
+                if (storyMaps(storyMap(controller.currentContinuity.data['legacyNpcArchives'])[widget.npcId])
+                    .isNotEmpty)
+                  TextButton.icon(
+                      icon: const Icon(Icons.archive_outlined),
+                      label: const Text('查看升级前混合私聊归档'),
+                      onPressed: () => showDialog<void>(
+                          context: context,
+                          builder: (_) => AlertDialog(
+                              title: const Text('旧私聊归档 · 不作为当前世界知情依据'),
+                              content: SizedBox(
+                                  width: 600,
+                                  child: SingleChildScrollView(
+                                      child: SelectableText(storyMaps(storyMap(
+                                              controller.currentContinuity
+                                                  .data['legacyNpcArchives'])[widget.npcId])
+                                          .map((m) => m['content']?.toString() ?? '')
+                                          .join('\n\n'))))))),
                 const SizedBox(height: 10),
                 ChatInputBar(
                   isSending: controller.isNpcReplyingTo(widget.npcId),
@@ -461,16 +499,34 @@ class _NpcChatThreadScreenState extends State<NpcChatThreadScreen> {
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 if (message.role == NpcMessageRole.npc)
-                  ListTile(
-                    leading: const Icon(Icons.hearing_rounded),
-                    title: Text(AppTheme.glitchText(
-                      message.innerVoice.trim().isEmpty ? '听这句心声' : '重新生成心声',
-                    )),
+                  if (message.role == NpcMessageRole.npc)
+                    ListTile(
+                        leading: const Icon(Icons.auto_fix_high),
+                        title: const Text('局部重写 / 版本'),
+                        onTap: () {
+                          Navigator.pop(context);
+                          showStoryRewriteDialog(this.context, message.id,
+                              npcId: widget.npcId);
+                        }),
+                ListTile(
+                    leading: const Icon(Icons.push_pin_outlined),
+                    title: const Text('记为重要事实'),
                     onTap: () {
-                      Navigator.of(context).pop();
-                      _generateInnerVoice(message);
-                    },
-                  ),
+                      Navigator.pop(context);
+                      showRememberStoryFact(
+                          this.context, message.id, message.content,
+                          npcId: widget.npcId);
+                    }),
+                ListTile(
+                  leading: const Icon(Icons.hearing_rounded),
+                  title: Text(AppTheme.glitchText(
+                    message.innerVoice.trim().isEmpty ? '听这句心声' : '重新生成心声',
+                  )),
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    _generateInnerVoice(message);
+                  },
+                ),
                 ListTile(
                   leading: const Icon(Icons.edit_outlined),
                   title: Text(AppTheme.glitchText('编辑')),
@@ -671,21 +727,10 @@ class _NpcChatThreadScreenState extends State<NpcChatThreadScreen> {
     );
   }
 
-  void _scrollToBottomIfNeeded(int messageCount) {
-    if (messageCount == _lastMessageCount) {
-      return;
+  void _scrollToBottomIfNeeded(int count) {
+    if (_lastMessageCount != count) {
+      _lastMessageCount = count;
     }
-    _lastMessageCount = messageCount;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) {
-        return;
-      }
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 260),
-        curve: Curves.easeOutCubic,
-      );
-    });
   }
 
   void _showImpressionSheet(NpcProfile npc) {

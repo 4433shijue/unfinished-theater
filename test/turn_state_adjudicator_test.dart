@@ -1,3 +1,4 @@
+import 'package:ai_roleplay_chat/models/story_continuity.dart';
 import 'dart:convert';
 
 import 'package:ai_roleplay_chat/controllers/app_state_controller.dart';
@@ -123,7 +124,10 @@ void main() {
 
     final updatedActive = controller.npcProfileById(activeNpc.id)!;
     expect(updatedActive.affinity, 14);
-    final activeMessages = await store.loadNpcMessages(activeNpc.id);
+    final activeMessages = NpcWorldState.fromJson(storyMap(
+            (await store.loadStoryContinuity(character.id))
+                .npcWorlds[activeNpc.id]))
+        .messages;
     expect(activeMessages, hasLength(1));
     expect(activeMessages.single.content, '到家后和我说一声。');
     expect(activeMessages.single.batchId, startsWith('npc_turn::'));
@@ -136,7 +140,12 @@ void main() {
 
     final updatedDead = controller.npcProfileById(deadNpc.id)!;
     expect(updatedDead.affinity, 30);
-    expect(await store.loadNpcMessages(deadNpc.id), isEmpty);
+    expect(
+        NpcWorldState.fromJson(storyMap(
+                (await store.loadStoryContinuity(character.id))
+                    .npcWorlds[deadNpc.id]))
+            .messages,
+        isEmpty);
     expect(
       await controller.queueNpcUserMessage(deadNpc.id, '你还在吗？'),
       contains('私聊已冻结'),
@@ -145,7 +154,12 @@ void main() {
     final updatedMissing = controller.npcProfileById(missingNpc.id)!;
     expect(updatedMissing.lifecycle, NpcLifecycle.missing);
     expect(updatedMissing.affinity, 12);
-    expect(await store.loadNpcMessages(missingNpc.id), isEmpty);
+    expect(
+        NpcWorldState.fromJson(storyMap(
+                (await store.loadStoryContinuity(character.id))
+                    .npcWorlds[missingNpc.id]))
+            .messages,
+        isEmpty);
   });
 
   test('ambient NPC contact is delivered once at the third assistant turn',
@@ -196,7 +210,9 @@ void main() {
       sourceTurnId: 'assistant-3',
     );
 
-    final messages = await store.loadNpcMessages(npc.id);
+    final messages = NpcWorldState.fromJson(storyMap(
+            (await store.loadStoryContinuity(character.id)).npcWorlds[npc.id]))
+        .messages;
     expect(client.utilityCalls, 1);
     expect(messages.map((message) => message.content), <String>[
       '刚才忘了问，你到家了吗？',

@@ -1,6 +1,6 @@
 # 提示词固定样本评测
 
-评测工具位于 `tools/prompt_eval/`。16 个虚构场景使用真实生产请求构建、JSON/协议解析器和必要的 Controller 流程，不另抄一套生成提示词。结果分别记录机器协议检查与待人工评分的内容质量。
+评测工具位于 `tools/prompt_eval/`。21 个虚构场景使用真实生产请求构建、JSON/协议解析器和必要的 Controller 流程，不另抄一套生成提示词。结果分别记录机器协议检查与待人工评分的内容质量。
 
 普通 CI 只跑传输层单元测试，评测 runner 默认跳过。显式 `run` 默认使用模拟回复，不联网调用模型，也不读取应用存档或寻找 API 密钥。
 
@@ -9,7 +9,7 @@
 在项目根目录执行，先按项目常规流程完成 `flutter pub get`。
 
 ```powershell
-# 16 个场景各跑两次，捕获实际生产请求，回复全部为模拟数据。
+# 21 个场景各跑两次，捕获实际生产请求，回复全部为模拟数据。
 python tools/prompt_eval/prompt_eval.py run --output .tmp/prompt-eval/current.json
 
 # 固定旧版源码。git archive 在临时目录运行，不切当前分支。
@@ -77,10 +77,15 @@ python tools/prompt_eval/prompt_eval.py report .tmp/prompt-eval/live-old.json .t
 | `item_identification` | 鉴定结果与扣费 | `AppStateController.identifyStoryInventoryItem` |
 | `fanfic_continuation` | 原灵感和续写衔接 | `AppStateController.generateFanfic`，固定截断注入 |
 | `npc_role_card` | 已有角色事实保留 | `AppStateController.buildNpcRoleCardDraft` |
+| `pinned_fact_conflict` | 固定事实冲突不得静默覆盖 | `StoryContinuityEngine.apply` |
+| `npc_secret_boundary` | 检查私聊实际请求不含其他 NPC 秘密 | `AppStateController.requestNpcReply` |
+| `rewrite_preview` | 候选预览与过期来源检查 | `AppStateController.previewStoryRewrite` |
+| `director_scope` | 偏好优先级与成功消费 | 主线生产 Controller |
+| `scene_closure` | 收尾、章节记录与临时偏好结束 | `AppStateController.closeStoryScene` |
 
 主剧情场景验证真实 `streamChat` 构建、HTTP 传输和正式回复协议/变量解析，不模拟整个玩家 UI 发送链，也不自行增加一套主剧情修复策略。因此主剧情可能报告原始协议失败，不能把它解释成已验证所有生产裁判、后台任务与修复。正式服务本身有补全/修复的任务则按原流程继续运行，并记录每次调用。变量补丁会交给正式权限引擎检查；内容是否自然、语义是否泄漏、事实是否遗漏还需人工审阅。
 
-三个故障场景在离线和 live 下都注入同一份损坏/截短首轮结果，标记为 `fault_fixture`（离线则 `synthetic_mock`），让后续真实修复面对完全一致的错误。它们不计入普通模型首轮通过率。报告保留修复前后的文本，不会将一次修复成功改写为首轮成功。离线完整回合默认共 19 次生产调用，3 次是额外修复/续写。
+三个故障场景在离线和 live 下都注入同一份损坏/截短首轮结果，标记为 `fault_fixture`（离线则 `synthetic_mock`），让后续真实修复面对完全一致的错误。它们不计入普通模型首轮通过率。报告保留修复前后的文本，不会将一次修复成功改写为首轮成功。v2.14.0 离线单次完整运行共 26 次模拟生产调用，5 次为场景内额外调用，真实网络请求为 0。新增场景也覆盖多步骤预览与结算，不能把这些额外调用都解释成模型修复。旧版本的 16 场景通常是 19 次调用。
 
 固定输入时间、角色 ID、NPC、历史与初始变量相同；Controller 内部使用系统时间生成的结果 ID 不参与评分或比较。两版保留各自生产参数，报告保留完整 payload 供核对。采样不能保证确定性，也不能假设某个兼容服务支持 seed。版本比较包含运行逻辑差异，不应把所有变化都归因于提示词文案。
 

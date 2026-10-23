@@ -1,3 +1,4 @@
+import '../models/story_continuity.dart';
 import '../models/character_profile.dart';
 import '../models/data_management.dart';
 import '../models/dialogue_history.dart';
@@ -61,8 +62,30 @@ class DataHealthService {
     required Iterable<DialogueHistory> histories,
     required Iterable<GameStateSnapshot> gameStates,
     required Iterable<MapWorldState> mapStates,
+    Iterable<StoryContinuityState> continuity = const [],
   }) {
     final issues = <DataHealthIssue>[];
+    for (final state in continuity) {
+      final mainIds = histories
+          .where((h) => h.characterId == state.characterId)
+          .expand((h) => h.messages.map((m) => m.id))
+          .toSet();
+      final sourceIds = {
+        ...mainIds,
+        ...state.npcWorlds.values.expand((raw) =>
+            NpcWorldState.fromJson(storyMap(raw)).messages.map((m) => m.id))
+      };
+      final missing = state.activeFacts
+          .where((f) =>
+              storyStrings(f['sourceIds']).any((id) => !sourceIds.contains(id)))
+          .length;
+      if (missing > 0) {
+        issues.add(DataHealthIssue(
+            severity: DataHealthSeverity.warning,
+            title: '连续记忆来源待核对',
+            description: '有 $missing 条事实的来源已不在当前世界记录中，请在事实页核对。'));
+      }
+    }
     final characterIds = characters.map((item) => item.id).toSet();
     final npcIds = npcs.map((item) => item.id).toSet();
 

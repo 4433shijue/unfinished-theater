@@ -105,6 +105,14 @@ class NarrativeContent {
               caseSensitive: false)
           .hasMatch(m.group(2) ?? '');
 
+  /// A same-length mask preserves exact occurrence offsets for text selection.
+  static String maskHtmlForSelection(String content) {
+    String mask(String html) => '\n' * html.length;
+    final fenced = content.replaceAllMapped(
+        fences, (m) => isHtmlFence(m) ? mask(m.group(0)!) : m.group(0)!);
+    return _transformRawHtml(fenced, mask);
+  }
+
   static String withoutHtml(String content) {
     var result = content.replaceAllMapped(
         fences, (m) => isHtmlFence(m) ? '\n' : m.group(0)!);

@@ -29,6 +29,8 @@ class ChatMessageBubble extends StatefulWidget {
     this.streamingElapsedSeconds = 0,
     this.onCopy,
     this.onEdit,
+    this.onRewrite,
+    this.onRememberFact,
     this.onDelete,
     this.onRegenerate,
     this.onBeautifyPanel,
@@ -62,6 +64,8 @@ class ChatMessageBubble extends StatefulWidget {
   final int streamingElapsedSeconds;
   final VoidCallback? onCopy;
   final VoidCallback? onEdit;
+  final ValueChanged<String?>? onRewrite;
+  final VoidCallback? onRememberFact;
   final VoidCallback? onDelete;
   final VoidCallback? onRegenerate;
   final VoidCallback? onBeautifyPanel;
@@ -92,6 +96,7 @@ class ChatMessageBubble extends StatefulWidget {
 }
 
 class _ChatMessageBubbleState extends State<ChatMessageBubble> {
+  String? _storySelectedText;
   bool _hovered = false;
 
   bool get _showSelection =>
@@ -456,6 +461,10 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
     if (parsed.groupChatMessages.isNotEmpty) {
       return <Widget>[
         _GroupChatMessageFlow(
+          onSelectedText: (text) => _storySelectedText = text,
+          onRewrite: widget.onRewrite == null
+              ? null
+              : () => widget.onRewrite!(_storySelectedText),
           messages: parsed.groupChatMessages,
           npcProfiles: widget.npcProfiles,
           onMention: widget.isStreaming ? null : widget.onGroupChatMention,
@@ -496,6 +505,21 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
             : Colors.black.withValues(alpha: 0.16);
         return _assistantTextBubble(
           child: SelectionArea(
+            onSelectionChanged: (value) =>
+                _storySelectedText = value?.plainText,
+            contextMenuBuilder: (context, region) =>
+                AdaptiveTextSelectionToolbar.buttonItems(
+                    anchors: region.contextMenuAnchors,
+                    buttonItems: [
+                  ...region.contextMenuButtonItems,
+                  if (widget.onRewrite != null)
+                    ContextMenuButtonItem(
+                        label: '局部改写',
+                        onPressed: () {
+                          region.hideToolbar();
+                          widget.onRewrite!(_storySelectedText);
+                        })
+                ]),
             child: MarkdownBody(
               data: block.content,
               selectable: false,
@@ -604,6 +628,18 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
               onTap: widget.onCopy,
               color: iconColor,
             ),
+            if (!isUser && widget.onRewrite != null)
+              _ActionIcon(
+                  tooltip: '局部重写 / 版本',
+                  icon: Icons.auto_fix_high,
+                  onTap: () => widget.onRewrite!(_storySelectedText),
+                  color: iconColor),
+            if (widget.onRememberFact != null)
+              _ActionIcon(
+                  tooltip: '记为重要事实',
+                  icon: Icons.push_pin_outlined,
+                  onTap: widget.onRememberFact,
+                  color: iconColor),
             _ActionIcon(
               tooltip: AppTheme.glitchText('编辑'),
               icon: Icons.edit_outlined,
@@ -665,6 +701,16 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
     }
 
     final actions = <_MessageAction>[
+      if (!isUser && widget.onRewrite != null)
+        _MessageAction(
+            label: '局部重写 / 版本',
+            icon: Icons.auto_fix_high,
+            onTap: () => widget.onRewrite!(_storySelectedText)),
+      if (widget.onRememberFact != null)
+        _MessageAction(
+            label: '记为重要事实',
+            icon: Icons.push_pin_outlined,
+            onTap: widget.onRememberFact),
       _MessageAction(
         label: '复制消息',
         icon: Icons.content_copy_outlined,
@@ -2389,12 +2435,16 @@ class _GroupChatMessageFlow extends StatelessWidget {
     required this.npcProfiles,
     this.onMention,
     this.onReply,
+    this.onSelectedText,
+    this.onRewrite,
   });
 
   final List<GroupChatMessage> messages;
   final List<NpcProfile> npcProfiles;
   final ValueChanged<GroupChatMessage>? onMention;
   final ValueChanged<GroupChatMessage>? onReply;
+  final ValueChanged<String?>? onSelectedText;
+  final VoidCallback? onRewrite;
 
   @override
   Widget build(BuildContext context) {
@@ -2412,6 +2462,8 @@ class _GroupChatMessageFlow extends StatelessWidget {
             replyTarget: messagesById[messages[index].replyTo.trim()],
             onMention: onMention,
             onReply: onReply,
+            onSelectedText: onSelectedText,
+            onRewrite: onRewrite,
           ),
           if (index != messages.length - 1) const SizedBox(height: 9),
         ],
@@ -2452,6 +2504,8 @@ class _GroupChatBubble extends StatelessWidget {
     required this.replyTarget,
     this.onMention,
     this.onReply,
+    this.onSelectedText,
+    this.onRewrite,
   });
 
   final GroupChatMessage message;
@@ -2459,6 +2513,8 @@ class _GroupChatBubble extends StatelessWidget {
   final GroupChatMessage? replyTarget;
   final ValueChanged<GroupChatMessage>? onMention;
   final ValueChanged<GroupChatMessage>? onReply;
+  final ValueChanged<String?>? onSelectedText;
+  final VoidCallback? onRewrite;
 
   static const List<Color> _speakerPalette = <Color>[
     Color(0xFF287D8E),
@@ -2596,6 +2652,21 @@ class _GroupChatBubble extends StatelessWidget {
                     ],
                     const SizedBox(height: 6),
                     SelectionArea(
+                      onSelectionChanged: (selection) =>
+                          onSelectedText?.call(selection?.plainText),
+                      contextMenuBuilder: (context, region) =>
+                          AdaptiveTextSelectionToolbar.buttonItems(
+                              anchors: region.contextMenuAnchors,
+                              buttonItems: [
+                            ...region.contextMenuButtonItems,
+                            if (onRewrite != null)
+                              ContextMenuButtonItem(
+                                  label: '局部改写',
+                                  onPressed: () {
+                                    region.hideToolbar();
+                                    onRewrite!();
+                                  })
+                          ]),
                       child: Text(
                         message.content,
                         style: theme.textTheme.bodyLarge?.copyWith(

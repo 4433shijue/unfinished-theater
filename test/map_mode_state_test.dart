@@ -1,3 +1,6 @@
+import 'package:ai_roleplay_chat/models/dialogue_history.dart';
+import 'package:ai_roleplay_chat/models/character_memory.dart';
+import 'package:ai_roleplay_chat/models/story_continuity.dart';
 import 'package:ai_roleplay_chat/models/inline_theater_settings.dart';
 import 'package:ai_roleplay_chat/services/narrative_content.dart';
 import 'dart:convert';
@@ -102,7 +105,10 @@ void main() {
     expect(state.eventSummary, '地图摘要：地点甲传来新的动静');
     expect(state.eventLog.first, '地图摘要：地点甲传来新的动静');
 
-    final messages = await LocalStore().loadNpcMessages(npc.id);
+    final messages = NpcWorldState.fromJson(storyMap(
+            (await LocalStore().loadStoryContinuity(character.id))
+                .npcWorlds[npc.id]))
+        .messages;
     expect(messages, hasLength(1));
     expect(messages.single.content, contains('这里有新的动静'));
   });
@@ -743,13 +749,29 @@ class _FailOnceGameStateStore extends LocalStore {
   void failNextSave() => _failNext = true;
 
   @override
-  Future<void> saveGameState(GameStateSnapshot state) async {
+  Future<void> commitStoryWorkspace(
+      {required StoryContinuityState state,
+      DialogueHistory? history,
+      CharacterMemory? memory,
+      GameStateSnapshot? gameState,
+      MapWorldState? mapState,
+      List<NpcProfile>? npcProfiles,
+      List<CharacterProfile>? characters,
+      String? selectedCharacterId}) async {
     if (_failNext) {
       _failNext = false;
       injectedFailures += 1;
       throw StateError('注入的游戏状态保存失败');
     }
-    await super.saveGameState(state);
+    await super.commitStoryWorkspace(
+        state: state,
+        history: history,
+        memory: memory,
+        gameState: gameState,
+        mapState: mapState,
+        npcProfiles: npcProfiles,
+        characters: characters,
+        selectedCharacterId: selectedCharacterId);
   }
 }
 
@@ -760,13 +782,29 @@ class _FailingMapCommitStore extends LocalStore {
   void failNextSaves(int count) => _remainingFailures = count;
 
   @override
-  Future<void> saveMapState(MapWorldState state) async {
+  Future<void> commitStoryWorkspace(
+      {required StoryContinuityState state,
+      DialogueHistory? history,
+      CharacterMemory? memory,
+      GameStateSnapshot? gameState,
+      MapWorldState? mapState,
+      List<NpcProfile>? npcProfiles,
+      List<CharacterProfile>? characters,
+      String? selectedCharacterId}) async {
     if (_remainingFailures > 0) {
       _remainingFailures -= 1;
       injectedFailures += 1;
       throw StateError('注入的地图状态保存失败');
     }
-    await super.saveMapState(state);
+    await super.commitStoryWorkspace(
+        state: state,
+        history: history,
+        memory: memory,
+        gameState: gameState,
+        mapState: mapState,
+        npcProfiles: npcProfiles,
+        characters: characters,
+        selectedCharacterId: selectedCharacterId);
   }
 }
 

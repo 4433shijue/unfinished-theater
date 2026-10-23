@@ -1,3 +1,5 @@
+import '../models/story_continuity.dart';
+import '../widgets/story_workbench.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -24,6 +26,7 @@ class _WorldBookEditorDialogState extends State<WorldBookEditorDialog> {
   late final TextEditingController _contentController;
   late final TextEditingController _tagsController;
   late bool _isGlobal;
+  StoryVisibility _storyVisibility = const StoryVisibility();
   late Set<String> _selectedCharacterIds;
   late WorldBookInjectionPosition _injectionPosition;
   late double _priority;
@@ -32,6 +35,7 @@ class _WorldBookEditorDialogState extends State<WorldBookEditorDialog> {
   void initState() {
     super.initState();
     final entry = widget.initialEntry;
+    _storyVisibility = entry?.visibility ?? const StoryVisibility();
     _titleController = TextEditingController(text: entry?.title ?? '');
     _contentController = TextEditingController(text: entry?.content ?? '');
     _tagsController = TextEditingController(text: entry?.tags.join('、') ?? '');
@@ -62,6 +66,7 @@ class _WorldBookEditorDialogState extends State<WorldBookEditorDialog> {
 
     Navigator.of(context).pop(
       WorldBookDraft(
+        visibility: _storyVisibility,
         title: title,
         content: content,
         global: _isGlobal,
@@ -116,6 +121,10 @@ class _WorldBookEditorDialogState extends State<WorldBookEditorDialog> {
                     ),
               ),
               const SizedBox(height: 8),
+              StoryVisibilityEditor(
+                  value: _storyVisibility,
+                  onChanged: (v) => setState(() => _storyVisibility = v)),
+              const SizedBox(height: 12),
               TextField(
                 controller: _titleController,
                 decoration: const InputDecoration(

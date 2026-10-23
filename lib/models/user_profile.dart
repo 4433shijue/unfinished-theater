@@ -1,3 +1,5 @@
+import 'story_continuity.dart';
+
 class UserProfile {
   const UserProfile({
     required this.id,
@@ -8,12 +10,14 @@ class UserProfile {
     this.gender = '',
     this.description = '',
     this.boundCharacterIds = const <String>[],
+    this.visibility = const StoryVisibility(),
   });
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
     final rawBoundIds = json['boundCharacterIds'];
     return UserProfile(
       id: json['id']?.toString() ?? '',
+      visibility: StoryVisibility.fromJson(json['visibility']),
       name: json['name']?.toString() ?? '未命名用户',
       createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
           DateTime.now(),
@@ -35,6 +39,7 @@ class UserProfile {
   final String gender;
   final String description;
   final List<String> boundCharacterIds;
+  final StoryVisibility visibility;
 
   bool isBoundTo(String characterId) {
     return boundCharacterIds.contains(characterId);
@@ -49,10 +54,12 @@ class UserProfile {
     String? gender,
     String? description,
     List<String>? boundCharacterIds,
+    StoryVisibility? visibility,
     bool clearBoundCharacterIds = false,
   }) {
     return UserProfile(
       id: id ?? this.id,
+      visibility: visibility ?? this.visibility,
       name: name ?? this.name,
       createdAt: createdAt ?? this.createdAt,
       persona: persona ?? this.persona,
@@ -75,6 +82,7 @@ class UserProfile {
       'gender': gender,
       'description': description,
       'boundCharacterIds': boundCharacterIds,
+      'visibility': visibility.toJson(),
     };
   }
 }
@@ -87,6 +95,7 @@ class UserProfileDraft {
     this.gender = '',
     this.description = '',
     this.boundCharacterIds = const <String>[],
+    this.visibility = const StoryVisibility(),
   });
 
   final String name;
@@ -95,4 +104,5 @@ class UserProfileDraft {
   final String gender;
   final String description;
   final List<String> boundCharacterIds;
+  final StoryVisibility visibility;
 }

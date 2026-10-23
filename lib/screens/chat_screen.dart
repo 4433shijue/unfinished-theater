@@ -1,3 +1,6 @@
+import '../models/story_continuity.dart';
+import '../widgets/story_anchored_list.dart';
+import '../widgets/story_workbench.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -140,6 +143,7 @@ class _DirectorInputButton extends StatelessWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
+  final _storyListKey = GlobalKey<StoryAnchoredListState>();
   late final ScrollController _scrollController;
   int _lastMessageCount = 0;
   bool _isImmersiveMode = false;
@@ -398,124 +402,168 @@ class _ChatScreenState extends State<ChatScreen> {
               Expanded(
                 child: _PremiumChatFrame(
                   themeDescriptor: themeDescriptor,
-                  child: history.messages.isEmpty
-                      ? EmptyState(
-                          icon: Icons.forum_outlined,
-                          title: '还没有对话记录',
-                          description: '输入第一条消息开始互动，角色会把重要内容沉淀到长期记忆里。',
-                        )
-                      : Stack(
-                          children: <Widget>[
-                            ListView.separated(
-                              controller: _scrollController,
-                              padding: const EdgeInsets.only(bottom: 76),
-                              itemCount: history.messages.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(height: 12),
-                              itemBuilder: (context, index) {
-                                final message = history.messages[index];
-                                final deferHtmlPreview = message.role ==
-                                        ChatRole.assistant &&
-                                    index < history.messages.length - 3 &&
-                                    !controller.isMessageStreaming(message.id);
-                                return ChatMessageBubble(
-                                  message: message,
-                                  assistantName: character.name,
-                                  isStreaming:
-                                      controller.isMessageStreaming(message.id),
-                                  streamingTextEnabled:
-                                      character.streamingOutputEnabled,
-                                  streamingElapsedSeconds:
-                                      controller.streamingElapsedSeconds,
-                                  showExportSelection: _isExportMode,
-                                  exportSelected:
-                                      selectedExportIds.contains(message.id),
-                                  onToggleExport: (value) {
-                                    setState(() {
-                                      if (value) {
-                                        _selectedExportIds.add(message.id);
-                                      } else {
-                                        _selectedExportIds.remove(message.id);
-                                      }
-                                    });
-                                  },
-                                  showBatchSelection: _isBatchSelectionMode,
-                                  batchSelected:
-                                      selectedMessageIds.contains(message.id),
-                                  onToggleBatchSelection: (value) =>
-                                      _toggleBatchSelection(message.id, value),
-                                  onSelectMultiple: () =>
-                                      _enterBatchSelection(message.id),
-                                  onCopy: () => _copyMessage(message),
-                                  onEdit: () => _editMessage(message),
-                                  onCreateBranch: () =>
-                                      _createStoryBranchFromMessage(message),
-                                  onToggleBookmark: () =>
-                                      _editBookmark(message),
-                                  onDelete: () => _confirmDelete(message),
-                                  onRegenerate:
-                                      message.role == ChatRole.assistant
-                                          ? () => _regenerateMessage(message.id)
-                                          : null,
-                                  onBeautifyPanel: message.role ==
+                  child: Stack(children: [
+                    Positioned.fill(
+                        child: history.messages.isEmpty
+                            ? EmptyState(
+                                icon: Icons.forum_outlined,
+                                title: '还没有对话记录',
+                                description: '输入第一条消息开始互动，角色会把重要内容沉淀到长期记忆里。',
+                              )
+                            : Stack(
+                                children: <Widget>[
+                                  StoryAnchoredList(
+                                    key: _storyListKey,
+                                    scopeKey: character.id,
+                                    ids: history.messages
+                                        .map((m) => m.id)
+                                        .toList(),
+                                    savedPosition: storyMap(controller
+                                        .currentContinuity.reading['main']),
+                                    generating: controller.isSending,
+                                    onPosition: (id, fraction, leaving) {
+                                      unawaited(controller.saveReadingPosition(
+                                          'main', id, fraction,
+                                          leaving: leaving,
+                                          worldId: character.id));
+                                    },
+                                    controller: _scrollController,
+                                    padding: const EdgeInsets.only(bottom: 76),
+                                    separatorBuilder: (_, __) =>
+                                        const SizedBox(height: 12),
+                                    itemBuilder: (context, index) {
+                                      final message = history.messages[index];
+                                      final deferHtmlPreview = message.role ==
                                               ChatRole.assistant &&
-                                          !character.largeGroupChatModeEnabled
-                                      ? () =>
-                                          _beautifyMessageAsPanel(message.id)
-                                      : null,
-                                  onRepairFormat:
-                                      message.role == ChatRole.assistant
-                                          ? () => _openFormatTool(message)
-                                          : null,
-                                  onChoicesSelected:
-                                      message.role == ChatRole.assistant
-                                          ? _fillInputWithChoices
-                                          : null,
-                                  onPreviewChoice:
-                                      message.role == ChatRole.assistant
-                                          ? (choice) =>
-                                              _previewChoice(message, choice)
-                                          : null,
-                                  onResetChoices:
-                                      message.role == ChatRole.assistant
-                                          ? _resetDraftInput
-                                          : null,
-                                  onHtmlActionSelected:
-                                      message.role == ChatRole.assistant
-                                          ? _fillInputWithText
-                                          : null,
-                                  npcProfiles:
-                                      controller.currentCharacterNpcProfiles,
-                                  onGroupChatMention:
-                                      character.largeGroupChatModeEnabled
-                                          ? _mentionGroupChatSpeaker
-                                          : null,
-                                  onGroupChatReply:
-                                      character.largeGroupChatModeEnabled
-                                          ? _replyToGroupChatMessage
-                                          : null,
-                                  equippedFrameId:
-                                      controller.currentBubbleFrameId,
-                                  equippedStickerId:
-                                      controller.gamification.equippedStickerId,
-                                  customBubbleStyle: BubbleStyleSpec.fromCustom(
-                                    controller.gamification.customBubbleStyles,
-                                    controller.currentBubbleFrameId,
+                                          index < history.messages.length - 3 &&
+                                          !controller
+                                              .isMessageStreaming(message.id);
+                                      return ChatMessageBubble(
+                                        message: message,
+                                        assistantName: character.name,
+                                        isStreaming: controller
+                                            .isMessageStreaming(message.id),
+                                        streamingTextEnabled:
+                                            character.streamingOutputEnabled,
+                                        streamingElapsedSeconds:
+                                            controller.streamingElapsedSeconds,
+                                        showExportSelection: _isExportMode,
+                                        exportSelected: selectedExportIds
+                                            .contains(message.id),
+                                        onToggleExport: (value) {
+                                          setState(() {
+                                            if (value) {
+                                              _selectedExportIds
+                                                  .add(message.id);
+                                            } else {
+                                              _selectedExportIds
+                                                  .remove(message.id);
+                                            }
+                                          });
+                                        },
+                                        showBatchSelection:
+                                            _isBatchSelectionMode,
+                                        batchSelected: selectedMessageIds
+                                            .contains(message.id),
+                                        onToggleBatchSelection: (value) =>
+                                            _toggleBatchSelection(
+                                                message.id, value),
+                                        onSelectMultiple: () =>
+                                            _enterBatchSelection(message.id),
+                                        onCopy: () => _copyMessage(message),
+                                        onEdit: () => _editMessage(message),
+                                        onRewrite: message.role ==
+                                                    ChatRole.assistant &&
+                                                !controller.isSending
+                                            ? (selection) =>
+                                                showStoryRewriteDialog(
+                                                    context, message.id,
+                                                    selection: selection)
+                                            : null,
+                                        onRememberFact: () =>
+                                            showRememberStoryFact(context,
+                                                message.id, message.content),
+                                        onCreateBranch: () =>
+                                            _createStoryBranchFromMessage(
+                                                message),
+                                        onToggleBookmark: () =>
+                                            _editBookmark(message),
+                                        onDelete: () => _confirmDelete(message),
+                                        onRegenerate: message.role ==
+                                                ChatRole.assistant
+                                            ? () =>
+                                                _regenerateMessage(message.id)
+                                            : null,
+                                        onBeautifyPanel: message.role ==
+                                                    ChatRole.assistant &&
+                                                !character
+                                                    .largeGroupChatModeEnabled
+                                            ? () => _beautifyMessageAsPanel(
+                                                message.id)
+                                            : null,
+                                        onRepairFormat:
+                                            message.role == ChatRole.assistant
+                                                ? () => _openFormatTool(message)
+                                                : null,
+                                        onChoicesSelected:
+                                            message.role == ChatRole.assistant
+                                                ? _fillInputWithChoices
+                                                : null,
+                                        onPreviewChoice: message.role ==
+                                                ChatRole.assistant
+                                            ? (choice) =>
+                                                _previewChoice(message, choice)
+                                            : null,
+                                        onResetChoices:
+                                            message.role == ChatRole.assistant
+                                                ? _resetDraftInput
+                                                : null,
+                                        onHtmlActionSelected:
+                                            message.role == ChatRole.assistant
+                                                ? _fillInputWithText
+                                                : null,
+                                        npcProfiles: controller
+                                            .currentCharacterNpcProfiles,
+                                        onGroupChatMention:
+                                            character.largeGroupChatModeEnabled
+                                                ? _mentionGroupChatSpeaker
+                                                : null,
+                                        onGroupChatReply:
+                                            character.largeGroupChatModeEnabled
+                                                ? _replyToGroupChatMessage
+                                                : null,
+                                        equippedFrameId:
+                                            controller.currentBubbleFrameId,
+                                        equippedStickerId: controller
+                                            .gamification.equippedStickerId,
+                                        customBubbleStyle:
+                                            BubbleStyleSpec.fromCustom(
+                                          controller
+                                              .gamification.customBubbleStyles,
+                                          controller.currentBubbleFrameId,
+                                        ),
+                                        deferHtmlPreview: deferHtmlPreview,
+                                      );
+                                    },
                                   ),
-                                  deferHtmlPreview: deferHtmlPreview,
-                                );
-                              },
-                            ),
-                            Positioned(
-                              right: 6,
-                              bottom: 14,
-                              child: _ChatScrollButtons(
-                                onTop: _scrollToTop,
-                                onBottom: _scrollToBottom,
-                              ),
-                            ),
-                          ],
-                        ),
+                                  Positioned(
+                                    right: 6,
+                                    bottom: 14,
+                                    child: _ChatScrollButtons(
+                                      onTop: _scrollToTop,
+                                      onBottom: _scrollToBottom,
+                                    ),
+                                  ),
+                                ],
+                              )),
+                    Positioned(
+                        top: 0,
+                        right: 0,
+                        child: StoryResumeLauncher(
+                            key: ValueKey('resume/${character.id}'),
+                            onJump: _jumpToStoryMessage,
+                            onOpenCalendar: _showWorldCalendarDialog)),
+                  ]),
                 ),
               ),
               SizedBox(
@@ -685,6 +733,10 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  void _jumpToStoryMessage(String id) {
+    _storyListKey.currentState?.jumpToMessage(id);
+  }
+
   void _scrollToTop() {
     if (!_scrollController.hasClients) {
       return;
@@ -776,15 +828,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (index < 0 || !_scrollController.hasClients) {
       return;
     }
-    final estimatedOffset = (index * 150.0).clamp(
-      0.0,
-      _scrollController.position.maxScrollExtent,
-    );
-    _scrollController.animateTo(
-      estimatedOffset,
-      duration: const Duration(milliseconds: 360),
-      curve: Curves.easeOutCubic,
-    );
+    await _storyListKey.currentState?.jumpToMessage(target.id);
   }
 
   Future<void> _confirmDeleteStoryBranch(CharacterProfile branch) async {
@@ -1886,120 +1930,8 @@ ${choice.index}. ${choice.label}
     );
   }
 
-  Future<void> _showDirectorDialog() async {
-    final moodController = TextEditingController();
-    final focusController = TextEditingController();
-    final noteController = TextEditingController();
-    var intensity = 2.0;
-    final existing = context.read<AppStateController>().activeTurnDirective;
-    if (existing != null) {
-      moodController.text = existing.mood;
-      focusController.text = existing.focus;
-      noteController.text = existing.note;
-      intensity = existing.intensity.toDouble();
-    }
+  Future<void> _showDirectorDialog() => showDirectorPreferencesDialog(context);
 
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: AppTheme.panel,
-              title: Text(AppTheme.glitchText('剧情导演台')),
-              content: SizedBox(
-                width: 520,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        AppTheme.glitchText(
-                          '这里写的是“本轮临时指令”，只影响下一次 AI 回复，不会写进角色提示词。',
-                        ),
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: AppTheme.textMuted,
-                            ),
-                      ),
-                      const SizedBox(height: 14),
-                      TextField(
-                        controller: moodController,
-                        decoration: InputDecoration(
-                          labelText: AppTheme.glitchText('本轮氛围'),
-                          hintText: AppTheme.glitchText('例如：轻松、暧昧、压迫、日常烟火气'),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: focusController,
-                        decoration: InputDecoration(
-                          labelText: AppTheme.glitchText('镜头重点'),
-                          hintText: AppTheme.glitchText('例如：多写 NPC 反应、重视内心戏'),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: noteController,
-                        minLines: 3,
-                        maxLines: 5,
-                        decoration: InputDecoration(
-                          labelText: AppTheme.glitchText('导演补充'),
-                          hintText: AppTheme.glitchText('想让下一回合特别注意什么，就塞这里。'),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(AppTheme.glitchText('指令强度：${intensity.round()}/5')),
-                      Slider(
-                        value: intensity,
-                        min: 1,
-                        max: 5,
-                        divisions: 4,
-                        onChanged: (value) =>
-                            setDialogState(() => intensity = value),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              actions: <Widget>[
-                TextButton(
-                  onPressed: () {
-                    context.read<AppStateController>().clearTurnDirective();
-                    Navigator.of(dialogContext).pop();
-                  },
-                  child: Text(AppTheme.glitchText('清空')),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: Text(AppTheme.glitchText('取消')),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    context.read<AppStateController>().setTurnDirective(
-                          TurnDirective(
-                            mood: moodController.text,
-                            focus: focusController.text,
-                            note: noteController.text,
-                            intensity: intensity.round(),
-                          ),
-                        );
-                    Navigator.of(dialogContext).pop();
-                  },
-                  child: Text(AppTheme.glitchText('应用到下一回合')),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-    moodController.dispose();
-    focusController.dispose();
-    noteController.dispose();
-  }
-
-  // ignore: unused_element
   Future<void> _showWorldCalendarDialog() async {
     await showDialog<void>(
       context: context,
@@ -2544,33 +2476,10 @@ ${choice.index}. ${choice.label}
     );
   }
 
-  void _scrollToBottomIfNeeded({
-    required int currentCount,
-    required bool isSending,
-  }) {
-    final countChanged = currentCount != _lastMessageCount;
-    _lastMessageCount = currentCount;
-
-    if (!countChanged && !isSending) {
-      return;
+  void _scrollToBottomIfNeeded(
+      {required int currentCount, required bool isSending}) {
+    if (_lastMessageCount != currentCount) {
+      _lastMessageCount = currentCount;
     }
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) {
-        return;
-      }
-
-      final target = _scrollController.position.maxScrollExtent;
-      if (countChanged) {
-        _scrollController.animateTo(
-          target,
-          duration: const Duration(milliseconds: 260),
-          curve: Curves.easeOutCubic,
-        );
-        return;
-      }
-
-      _scrollController.jumpTo(target);
-    });
   }
 }

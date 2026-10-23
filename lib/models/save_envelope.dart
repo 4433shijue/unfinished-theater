@@ -1,7 +1,7 @@
 import 'dart:convert';
 
-const int currentSaveSchemaVersion = 2;
-const String currentSaveAppVersion = '2.13.1+2131';
+const int currentSaveSchemaVersion = 3;
+const String currentSaveAppVersion = '2.14.0+2140';
 
 class SaveEnvelope {
   const SaveEnvelope({

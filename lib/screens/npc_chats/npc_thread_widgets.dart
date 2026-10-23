@@ -10,6 +10,7 @@ class _NpcMessageBubble extends StatelessWidget {
     this.selecting = false,
     this.onTap,
     this.onLongPress,
+    this.onRewrite,
   });
 
   final NpcChatMessage message;
@@ -20,6 +21,7 @@ class _NpcMessageBubble extends StatelessWidget {
   final bool selecting;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+  final void Function(String)? onRewrite;
 
   @override
   Widget build(BuildContext context) {
@@ -84,9 +86,25 @@ class _NpcMessageBubble extends StatelessWidget {
                                 ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
+                      SelectableText(
                         message.content,
-                        softWrap: true,
+                        contextMenuBuilder: (context, editable) =>
+                            AdaptiveTextSelectionToolbar.buttonItems(
+                                anchors: editable.contextMenuAnchors,
+                                buttonItems: [
+                              ...editable.contextMenuButtonItems,
+                              if (onRewrite != null)
+                                ContextMenuButtonItem(
+                                    label: '局部改写',
+                                    onPressed: () {
+                                      final selection =
+                                          editable.textEditingValue.selection;
+                                      final text =
+                                          selection.textInside(message.content);
+                                      editable.hideToolbar();
+                                      onRewrite!(text);
+                                    })
+                            ]),
                         style: Theme.of(context)
                             .textTheme
                             .bodyMedium

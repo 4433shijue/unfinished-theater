@@ -19,6 +19,7 @@ import '../models/story_systems.dart';
 import '../models/tool_result.dart';
 import '../models/user_profile.dart';
 import '../models/world_book.dart';
+import '../models/story_continuity.dart';
 import '../utils/id_generator.dart';
 
 class LocalDataCorruptionException implements Exception {
@@ -35,6 +36,79 @@ class LocalDataCorruptionException implements Exception {
 }
 
 class LocalStore {
+  Future<void> clearStoryReading(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('story_reading_$id');
+  }
+
+  Future<Map<String, dynamic>> loadStoryReading(String worldId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('story_reading_$worldId');
+    if (raw == null) return {};
+    try {
+      return storyMap(jsonDecode(raw));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> saveStoryReading(
+      String worldId, String surface, Map<String, dynamic> record) async {
+    final prefs = await SharedPreferences.getInstance();
+    final reading = await loadStoryReading(worldId);
+    reading[surface] = record;
+    await _setStringChecked(
+        prefs, 'story_reading_$worldId', jsonEncode(reading));
+  }
+
+  Future<StoryContinuityState> loadStoryContinuity(String characterId) async {
+    final prefs = await SharedPreferences.getInstance();
+    return _loadJsonValue<StoryContinuityState>(
+        prefs: prefs,
+        storageKey: 'story_continuity_$characterId',
+        fallback: () => StoryContinuityState(characterId: characterId),
+        parse: (raw) {
+          if (raw is! Map) {
+            throw const FormatException('story continuity must be an object');
+          }
+          return StoryContinuityState(
+              characterId: characterId, data: storyMap(raw));
+        });
+  }
+
+  Future<void> commitStoryWorkspace(
+      {required StoryContinuityState state,
+      DialogueHistory? history,
+      CharacterMemory? memory,
+      GameStateSnapshot? gameState,
+      MapWorldState? mapState,
+      List<NpcProfile>? npcProfiles,
+      List<CharacterProfile>? characters,
+      String? selectedCharacterId}) async {
+    await _commitStorageBatch(
+        journalName: 'story_${state.characterId}',
+        rollbackOnFailure: true,
+        writes: {
+          'story_continuity_${state.characterId}': jsonEncode(state.toJson()),
+          if (history != null)
+            _historyKey(history.characterId): jsonEncode(history.toJson()),
+          if (memory != null)
+            _memoryKey(memory.characterId): jsonEncode(memory.toJson()),
+          if (gameState != null)
+            _gameStateKey(state.characterId): jsonEncode(gameState.toJson()),
+          if (mapState != null)
+            _mapStateKey(state.characterId): jsonEncode(mapState.toJson()),
+          if (npcProfiles != null)
+            _npcProfilesKey:
+                jsonEncode(npcProfiles.map((p) => p.toJson()).toList()),
+          if (characters != null)
+            _charactersKey:
+                jsonEncode(characters.map((p) => p.toJson()).toList()),
+          if (selectedCharacterId != null)
+            _selectedCharacterKey: selectedCharacterId,
+        });
+  }
+
   static const String _installIdKey = 'install_id';
   static const String _installationMetaKey = 'installation_meta';
   static const String _tutorialSeenKey = 'tutorial_seen';
@@ -192,7 +266,29 @@ class LocalStore {
     CharacterMemory? memory,
     List<NpcProfile>? npcProfiles,
     GamificationState? gamification,
+    StoryContinuityState? continuity,
   }) async {
+    if (continuity != null) {
+      await _commitStorageBatch(
+          journalName: 'turn_story_${history.characterId}',
+          rollbackOnFailure: true,
+          writes: {
+            _historyKey(history.characterId): jsonEncode(history.toJson()),
+            'story_continuity_${history.characterId}':
+                jsonEncode(continuity.toJson()),
+            if (gameState != null)
+              _gameStateKey(history.characterId):
+                  jsonEncode(gameState.toJson()),
+            if (memory != null)
+              _memoryKey(history.characterId): jsonEncode(memory.toJson()),
+            if (npcProfiles != null)
+              _npcProfilesKey:
+                  jsonEncode(npcProfiles.map((n) => n.toJson()).toList()),
+            if (gamification != null)
+              _gamificationKey: jsonEncode(gamification.toJson())
+          });
+      return;
+    }
     final prefs = await SharedPreferences.getInstance();
     final payload = <String, dynamic>{
       'schemaVersion': 1,
@@ -204,6 +300,7 @@ class LocalStore {
       if (npcProfiles != null)
         'npcProfiles': npcProfiles.map((item) => item.toJson()).toList(),
       if (gamification != null) 'gamification': gamification.toJson(),
+      if (continuity != null) 'continuity': continuity.toJson(),
     };
     final journalKey = '$_turnCommitPrefix${history.characterId}';
     await _setStringChecked(prefs, journalKey, jsonEncode(payload));
@@ -234,6 +331,7 @@ class LocalStore {
     required String? selectedCharacterId,
     Iterable<String> deleteCharacterIds = const <String>[],
     Iterable<String> deleteNpcIds = const <String>[],
+    Map<String, StoryContinuityState> continuity = const {},
   }) async {
     final writes = <String, String?>{};
     for (final characterId in deleteCharacterIds) {
@@ -243,6 +341,8 @@ class LocalStore {
       writes[_memoryKey(clean)] = null;
       writes[_gameStateKey(clean)] = null;
       writes[_mapStateKey(clean)] = null;
+      writes['story_continuity_$clean'] = null;
+      writes['story_reading_$clean'] = null;
     }
     for (final npcId in deleteNpcIds) {
       final clean = npcId.trim();
@@ -293,6 +393,11 @@ class LocalStore {
       );
     }
 
+    for (final entry in continuity.entries) {
+      writes['story_continuity_${entry.key}'] =
+          jsonEncode(entry.value.toJson());
+      writes['story_reading_${entry.key}'] = jsonEncode(entry.value.reading);
+    }
     await _commitStorageBatch(
       journalName: 'archive_import',
       writes: writes,
@@ -1009,6 +1114,10 @@ class LocalStore {
       if (clean.isEmpty) {
         continue;
       }
+      result['story_continuity_$clean'] =
+          _estimatedBytes(prefs.get('story_continuity_$clean'));
+      result['story_reading_$clean'] =
+          _estimatedBytes(prefs.get('story_reading_$clean'));
       result[_historyKey(clean)] =
           _estimatedBytes(prefs.get(_historyKey(clean)));
       result[_memoryKey(clean)] = _estimatedBytes(prefs.get(_memoryKey(clean)));
@@ -1031,6 +1140,8 @@ class LocalStore {
 
   Future<void> deleteCharacterData(String characterId) async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('story_continuity_$characterId');
+    await prefs.remove('story_reading_$characterId');
     await prefs.remove(_historyKey(characterId));
     await prefs.remove(_memoryKey(characterId));
     await prefs.remove(_gameStateKey(characterId));
@@ -1119,6 +1230,11 @@ class LocalStore {
       jsonEncode(history.toJson()),
     );
 
+    final rawContinuity = payload['continuity'];
+    if (rawContinuity is Map) {
+      await _setStringChecked(
+          prefs, 'story_continuity_$characterId', jsonEncode(rawContinuity));
+    }
     final rawState = payload['gameState'];
     if (rawState is Map) {
       final state = GameStateSnapshot.fromJson(
@@ -1172,6 +1288,7 @@ class LocalStore {
   Future<void> _commitStorageBatch({
     required String journalName,
     required Map<String, String?> writes,
+    bool rollbackOnFailure = false,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     final journalKey = '$_storageBatchPrefix$journalName';
@@ -1180,8 +1297,22 @@ class LocalStore {
       'createdAt': DateTime.now().toIso8601String(),
       'writes': writes,
     };
+    final rollback = <String, dynamic>{
+      'schemaVersion': 1,
+      'writes': {for (final key in writes.keys) key: prefs.getString(key)}
+    };
     await _setStringChecked(prefs, journalKey, jsonEncode(payload));
-    await _applyStorageBatch(prefs, payload);
+    try {
+      await _applyStorageBatch(prefs, payload);
+    } catch (_) {
+      if (rollbackOnFailure) {
+        // If even rollback cannot finish, the next launch recovers the original.
+        await _setStringChecked(prefs, journalKey, jsonEncode(rollback));
+        await _applyStorageBatch(prefs, rollback);
+        await prefs.remove(journalKey);
+      }
+      rethrow;
+    }
     final removed = await prefs.remove(journalKey);
     if (!removed && prefs.containsKey(journalKey)) {
       throw StateError('无法清除批量提交日志：$journalKey');

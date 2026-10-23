@@ -1,3 +1,4 @@
+import 'story_continuity_engine.dart';
 import 'message_content_parser.dart';
 import 'dart:convert';
 
@@ -49,6 +50,8 @@ class TurnStateAdjudicator {
   },
   "gameplayPatch": {"ops": []}
 }
+
+${StoryContinuityEngine.patchContract}
 
 裁判规则：
 1. gameState 至少保留时间、地点、状态、当前任务等核心状态；没变的可沿用上轮。

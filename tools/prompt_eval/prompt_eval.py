@@ -55,8 +55,8 @@ def execute(args: argparse.Namespace, source: Path, revision: str) -> int:
         # A developer's environment must never turn an offline run into live.
         for name in ("PROMPT_EVAL_API_URL", "PROMPT_EVAL_API_KEY", "PROMPT_EVAL_MODEL"):
             env.pop(name, None)
-    command = [args.flutter, "test", "--no-pub", "test/prompt_eval_runner_test.dart", "--reporter", "expanded"]
-    print(f"{args.mode}: {len(selected) or 16} scenarios x {args.repeats}; "
+    command = [args.flutter, "--no-version-check", "test", "--no-pub", "test/prompt_eval_runner_test.dart", "--reporter", "expanded"]
+    print(f"{args.mode}: {len(selected) or len(available)} scenarios x {args.repeats}; "
           f"at most {args.max_requests} production calls / {args.max_output_tokens} reserved output tokens.")
     print("Fault fixtures and additional repair/continuation calls are itemized. No network retries.")
     completed = subprocess.run(command, cwd=source, env=env)
@@ -148,7 +148,7 @@ def main() -> int:
     capture.add_argument("--ref", help="Read a Git commit/tag in an isolated temporary archive")
     capture.add_argument("--output", required=True)
     capture.add_argument("--repeats", type=int, default=2)
-    capture.add_argument("--scenarios", default="", help="Comma-separated scenario IDs; default all 16")
+    capture.add_argument("--scenarios", default="", help="Comma-separated scenario IDs; default all scenarios")
     capture.add_argument("--max-requests", type=int, default=80)
     capture.add_argument("--max-output-tokens", type=int, default=655360)
     capture.add_argument("--flutter", default=shutil.which("flutter") or "flutter")

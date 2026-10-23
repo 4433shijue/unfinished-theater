@@ -1,3 +1,6 @@
+import '../models/story_continuity.dart';
+import '../services/story_continuity_engine.dart';
+import '../services/story_rewrite_service.dart';
 import '../models/inline_theater_settings.dart';
 import '../services/inline_theater_contract.dart';
 import '../services/narrative_content.dart';
@@ -55,6 +58,9 @@ import '../services/token_estimator.dart';
 import '../services/turn_state_adjudicator.dart';
 import '../theme/app_theme.dart';
 import '../utils/id_generator.dart';
+
+part 'story_continuity_controller.dart';
+part 'story_rewrite_controller.dart';
 
 class RouletteSpinResult {
   const RouletteSpinResult({
@@ -298,6 +304,11 @@ class AppStateController extends ChangeNotifier {
   String? _lastToolResultId;
   ToolResult? _ephemeralToolResult;
   String? _lastFanficResultId;
+  final Map<String, StoryContinuityState> _continuityCache = {};
+  StoryContinuityState? _storyContextOverride;
+  bool _closingStoryScene = false;
+  final Map<String, Map<String, dynamic>> _pendingContinuityPatches = {};
+  bool _storyOperationInProgress = false;
   TurnDirective? _activeTurnDirective;
   String? _activeNpcReplyingId;
   String? _pendingNpcLetterNotice;
@@ -311,6 +322,8 @@ class AppStateController extends ChangeNotifier {
   DateTime? _lastStreamingUiUpdateAt;
   final Set<String> _musicRoundTrackIds = <String>{};
   String? _lastRecordedTraceId;
+
+  void _notifyStoryChanges() => notifyListeners();
 
   bool get isInitializing => _isInitializing;
 
@@ -431,6 +444,7 @@ class AppStateController extends ChangeNotifier {
         histories: _historyCache.values,
         gameStates: _gameStateCache.values,
         mapStates: _mapStateCache.values,
+        continuity: _continuityCache.values,
       );
 
   PromptDiagnosticsSnapshot? get latestPromptDiagnostics =>
@@ -618,6 +632,12 @@ class AppStateController extends ChangeNotifier {
     String rootId, {
     DateTime? branchCutoff,
   }) {
+    final scoped = _continuityCache[characterId];
+    if (scoped?.data['npcScopeLocked'] == true &&
+        !scoped!.npcWorlds.containsKey(profile.id) &&
+        profile.characterId != characterId) {
+      return false;
+    }
     if (profile.globalBinding || profile.isBoundTo(characterId)) {
       return true;
     }
@@ -807,7 +827,15 @@ class AppStateController extends ChangeNotifier {
               branchCutoff: branchCutoff,
             ))
         .toList(growable: false);
-    return _dedupeNpcProfilesForDisplay(profiles)
+    final projected = _storyContextOverride?.characterId == characterId
+        ? profiles
+            .where((n) => _storyContextOverride!.npcWorlds.containsKey(n.id))
+            .map((n) => NpcWorldState.fromJson(
+                    storyMap(_storyContextOverride!.npcWorlds[n.id]))
+                .project(n))
+            .toList()
+        : profiles;
+    return _dedupeNpcProfilesForDisplay(projected)
       ..sort((a, b) {
         final companionOrder =
             (b.companionEnabled ? 1 : 0).compareTo(a.companionEnabled ? 1 : 0);
@@ -1190,7 +1218,7 @@ class AppStateController extends ChangeNotifier {
         await _store.saveFanficResults(_fanficResults);
       }
       if (!_npcProfileListsEqual(loadedNpcProfiles, _npcProfiles)) {
-        await _store.saveNpcProfiles(_npcProfiles);
+        await _persistNpcWorldProfiles();
       }
       if (!_npcMigrationListsEqual(loadedNpcMigrations, _npcMigrations)) {
         await _store.saveNpcMigrations(_npcMigrations);
@@ -2835,8 +2863,8 @@ ${_formatTranscript(history.messages.reversed.take(8).toList().reversed)}
         ),
       ];
       _npcMessagesCache[npcId] = nextMessages;
-      await _store.saveNpcMessages(npcId, nextMessages);
-      await _store.saveNpcProfiles(_npcProfiles);
+      await _saveNpcWorldMessages(npcId, nextMessages);
+      await _persistNpcWorldProfiles();
       await _updateGamification(
         (state) =>
             state.incrementStat('totalNpcGifts').incrementDailyStat('npcGifts'),
@@ -3665,6 +3693,18 @@ ${userNote.trim().isEmpty ? '' : '用户补充：${userNote.trim()}'}
       return;
     }
 
+    if (_isSending ||
+        _activeNpcReplyingId != null ||
+        _storyOperationInProgress) {
+      return;
+    }
+    if (_selectedCharacterId != null) await _persistNpcWorldProfiles();
+    for (final timer in _npcExtractionTimers.values) {
+      timer.cancel();
+    }
+    for (final timer in _npcProactiveTimers.values) {
+      timer.cancel();
+    }
     _selectedCharacterId = characterId;
     await _store.saveSelectedCharacterId(characterId);
     await _loadCharacterState(characterId);
@@ -4065,7 +4105,8 @@ ${userNote.trim().isEmpty ? '' : '用户补充：${userNote.trim()}'}
       npc: npc.copyWith(
         name: companionName,
         description: companionDescription,
-        roleCard: preview.archiveText,
+        roleCard:
+            '${preview.manifest.archive.coreIdentity}\n${NpcMigrationMemoryMode.label(preview.memoryMode)}\n${preview.manifest.memoryPolicy.runtimeFacts.join('\n')}\n${NpcMigrationRelationshipLock.prompt(preview.relationshipLock)}',
       ),
       sourceCharacterName: sourceCharacter.name,
     );
@@ -4075,7 +4116,7 @@ ${userNote.trim().isEmpty ? '' : '用户补充：${userNote.trim()}'}
       name: companionName,
       avatarDataUri: npc.avatarDataUri,
       description: companionDescription,
-      impression: npc.impression,
+      impression: preview.manifest.relationship.startingState,
       affinity: npc.affinity,
       createdAt: now,
       updatedAt: now,
@@ -4085,14 +4126,18 @@ ${userNote.trim().isEmpty ? '' : '用户补充：${userNote.trim()}'}
       companionEnabled: true,
       globalBinding: false,
       boundCharacterIds: <String>[newCharacter.id],
-      impressionHistory: npc.impressionHistory,
-      bondRoute: npc.bondRoute,
+      impressionHistory: const [],
+      bondRoute: npc.bondRoute.copyWith(
+          latestEvent: preview.manifest.relationship.startingState,
+          events: [],
+          keywords: []),
     );
     final worldBook = WorldBookEntry(
       title: preview.worldBookTitle.trim().isEmpty
           ? '你们的前尘 · ${npc.name}'
           : preview.worldBookTitle.trim(),
       content: preview.worldBookContent.trim(),
+      visibility: const StoryVisibility(),
       global: false,
       tags: const <String>['带走NPC'],
       boundCharacterIds: <String>[newCharacter.id],
@@ -4153,8 +4198,8 @@ ${userNote.trim().isEmpty ? '' : '用户补充：${userNote.trim()}'}
       await _store.saveGameState(_gameStateCache[newCharacter.id]!);
       await _store.saveMapState(_mapStateCache[newCharacter.id]!);
       await _store.saveWorldBooks(_worldBooks);
-      await _store.saveNpcProfiles(_npcProfiles);
-      await _store.saveNpcMessages(companionNpc.id, const <NpcChatMessage>[]);
+      await _persistNpcWorldProfiles();
+      await _saveNpcWorldMessages(companionNpc.id, const <NpcChatMessage>[]);
       await _store.saveNpcMigrations(_npcMigrations);
     } catch (error) {
       _characters
@@ -4177,7 +4222,7 @@ ${userNote.trim().isEmpty ? '' : '用户补充：${userNote.trim()}'}
       try {
         await _store.saveCharacters(_characters);
         await _store.saveWorldBooks(_worldBooks);
-        await _store.saveNpcProfiles(_npcProfiles);
+        await _persistNpcWorldProfiles();
         await _store.saveNpcMigrations(_npcMigrations);
         await _store.deleteCharacterData(newCharacter.id);
         await _store.deleteNpcMessages(companionNpc.id);
@@ -4786,7 +4831,11 @@ $instruction
       return '没有找到这条消息，暂时没法从这里开分支。';
     }
 
+    await _persistNpcWorldProfiles();
     final branchId = IdGenerator.character();
+    final branchContinuity = _continuityAtMessage(
+        await _ensureContinuity(sourceCharacter.id), messageId, branchId);
+    final npcIdMap = <String, String>{};
     final now = DateTime.now();
     final branch = CharacterProfile(
       id: branchId,
@@ -4829,8 +4878,10 @@ $instruction
       characterId: branchId,
       summaries: sourceMemory.summaries
           .where((summary) =>
-              summary.relatedMessageIds.isEmpty ||
-              summary.relatedMessageIds.any(branchMessageIds.contains))
+              (summary.relatedMessageIds.isEmpty &&
+                  !summary.timestamp.isAfter(
+                      sourceHistory.messages[originIndex].timestamp)) ||
+              summary.relatedMessageIds.every(branchMessageIds.contains))
           .toList(growable: false),
     );
     final snapshotMessage =
@@ -4841,7 +4892,9 @@ $instruction
       sourceCharacterId: sourceCharacter.id,
       branchId: branchId,
     );
-    final sourceMapState = await _ensureMapState(sourceCharacter.id);
+    final sourceMapState = branchContinuity.data['mapState'] is Map
+        ? MapWorldState.fromJson(storyMap(branchContinuity.data['mapState']))
+        : MapWorldState.empty(sourceCharacter.id);
     final branchMapState = _mapStateForBranch(
       sourceMapState,
       branchGameState,
@@ -4876,6 +4929,7 @@ $instruction
         continue;
       }
       final branchNpcId = IdGenerator.generic('npc');
+      npcIdMap[npc.id] = branchNpcId;
       final branchNpc = npc.copyWith(
         id: branchNpcId,
         characterId: branchId,
@@ -4885,7 +4939,9 @@ $instruction
         boundCharacterIds: <String>[branchId],
       );
       _npcProfiles.insert(0, branchNpc);
-      final npcMessages = await _ensureNpcMessages(npc.id);
+      final npcMessages =
+          NpcWorldState.fromJson(storyMap(branchContinuity.npcWorlds[npc.id]))
+              .messages;
       final branchNpcMessages = npcMessages
           .map((message) => message.copyWith(npcId: branchNpcId))
           .toList(growable: false);
@@ -4898,7 +4954,15 @@ $instruction
     await _store.saveCharacterMemory(branchMemory);
     await _store.saveGameState(branchGameState);
     await _store.saveMapState(branchMapState);
-    await _store.saveNpcProfiles(_npcProfiles);
+    await _persistNpcWorldProfiles();
+    final mappedContinuity = StoryContinuityState(
+        characterId: branchId,
+        data: storyMap(_remapStoryIds(branchContinuity.toJson(),
+            {...npcIdMap, sourceCharacter.id: branchId})));
+    mappedContinuity.data['npcMigrationVersion'] = 1;
+    mappedContinuity.data['npcScopeLocked'] = true;
+    await _store.commitStoryWorkspace(state: mappedContinuity);
+    _continuityCache[branchId] = mappedContinuity;
     await selectCharacter(branchId);
     return null;
   }
@@ -5001,6 +5065,7 @@ $instruction
         );
       }
       for (final removedId in removedCharacterIds) {
+        _continuityCache.remove(removedId);
         _historyCache.remove(removedId);
         _memoryCache.remove(removedId);
         _gameStateCache.remove(removedId);
@@ -5032,7 +5097,7 @@ $instruction
       await _store.saveFanficResults(_fanficResults);
       await _store.saveWorldCalendarEvents(_worldCalendarEvents);
       await _store.saveGamificationState(_gamification);
-      await _store.saveNpcProfiles(_npcProfiles);
+      await _persistNpcWorldProfiles();
       await _store.saveNpcMigrations(_npcMigrations);
       for (final removedId in removedCharacterIds) {
         await _store.deleteCharacterData(removedId);
@@ -5160,6 +5225,7 @@ $instruction
       name: draft.name.trim(),
       createdAt: DateTime.now(),
       persona: draft.persona.trim(),
+      visibility: draft.visibility,
       avatarDataUri: draft.avatarDataUri.trim(),
       gender: draft.gender.trim(),
       description: draft.description.trim(),
@@ -5182,6 +5248,7 @@ $instruction
     _userProfiles[index] = original.copyWith(
       name: draft.name.trim(),
       persona: draft.persona.trim(),
+      visibility: draft.visibility,
       avatarDataUri: draft.avatarDataUri.trim(),
       gender: draft.gender.trim(),
       description: draft.description.trim(),
@@ -5245,8 +5312,8 @@ $instruction
 
     _npcProfiles.insert(0, profile);
     _npcMessagesCache[profile.id] = const <NpcChatMessage>[];
-    await _store.saveNpcProfiles(_npcProfiles);
-    await _store.saveNpcMessages(profile.id, const <NpcChatMessage>[]);
+    await _persistNpcWorldProfiles();
+    await _saveNpcWorldMessages(profile.id, const <NpcChatMessage>[]);
     await _updateGamification(
       (state) => state.incrementStat('totalNpcProfilesCreated'),
       notify: false,
@@ -5282,7 +5349,7 @@ $instruction
       ),
       updatedAt: DateTime.now(),
     );
-    await _store.saveNpcProfiles(_npcProfiles);
+    await _persistNpcWorldProfiles();
     notifyListeners();
   }
 
@@ -5310,7 +5377,7 @@ $instruction
       ),
       updatedAt: DateTime.now(),
     );
-    await _store.saveNpcProfiles(_npcProfiles);
+    await _persistNpcWorldProfiles();
     notifyListeners();
     return null;
   }
@@ -5341,7 +5408,7 @@ $instruction
       ),
       updatedAt: DateTime.now(),
     );
-    await _store.saveNpcProfiles(_npcProfiles);
+    await _persistNpcWorldProfiles();
     notifyListeners();
     return null;
   }
@@ -5381,7 +5448,7 @@ $instruction
       updatedAt: DateTime.now(),
     );
     _npcProfiles[index] = next;
-    await _store.saveNpcProfiles(_npcProfiles);
+    await _persistNpcWorldProfiles();
     notifyListeners();
     return NpcRoleCardDraftResult(
       draft: draft.copyWith(
@@ -5529,20 +5596,21 @@ $instruction
     }
 
     _npcMessagesCache.remove(npcId);
-    await _store.saveNpcProfiles(_npcProfiles);
+    await _persistNpcWorldProfiles();
     await _store.deleteNpcMessages(npcId);
     notifyListeners();
   }
 
   Future<void> loadNpcThread(String npcId) async {
-    if (_npcMessagesCache.containsKey(npcId)) {
-      return;
-    }
-    _npcMessagesCache[npcId] = await _store.loadNpcMessages(npcId);
+    await _ensureNpcMessages(npcId);
     notifyListeners();
   }
 
   Future<String?> queueNpcUserMessage(String npcId, String content) async {
+    if (_storyOperationInProgress || (_isSending && !_closingStoryScene)) {
+      return '请先完成当前生成或改写。';
+    }
+
     final profile = npcProfileById(npcId);
     final trimmed = content.trim();
 
@@ -5570,15 +5638,19 @@ $instruction
     );
     final nextMessages = <NpcChatMessage>[...messages, message];
     _npcMessagesCache[npcId] = nextMessages;
-    await _store.saveNpcMessages(npcId, nextMessages);
+    await _saveNpcWorldMessages(npcId, nextMessages);
 
     _touchNpcProfile(profile);
-    await _store.saveNpcProfiles(_npcProfiles);
+    await _persistNpcWorldProfiles();
     notifyListeners();
     return null;
   }
 
   Future<String?> requestNpcReply(String npcId) async {
+    if (_storyOperationInProgress || (_isSending && !_closingStoryScene)) {
+      return '请先完成当前生成或改写。';
+    }
+
     final npc = npcProfileById(npcId);
     final character = _characterForNpcInteraction(npc);
     if (npc == null || character == null) {
@@ -5599,6 +5671,8 @@ $instruction
       return '还没有待发送给 NPC 的消息。';
     }
 
+    final beforeContinuity =
+        _captureNpcWorld(await _ensureContinuity(character.id));
     _activeNpcReplyingId = npcId;
     notifyListeners();
 
@@ -5633,7 +5707,6 @@ $instruction
 
       final nextMessages = <NpcChatMessage>[...messages, ...replies];
       _npcMessagesCache[npcId] = nextMessages;
-      await _store.saveNpcMessages(npcId, nextMessages);
 
       final impressionEntry = NpcImpressionEntry(
         id: IdGenerator.generic('npc_imp'),
@@ -5654,7 +5727,27 @@ $instruction
       if (updatedNpc != null) {
         await _noteNpcBondScore(updatedNpc.bondRoute.score);
       }
-      await _store.saveNpcProfiles(_npcProfiles);
+      var nextContinuity = StoryContinuityEngine.apply(
+          state: beforeContinuity,
+          eventId: batchId,
+          sourceIds: replies.map((m) => m.id).toList(),
+          narrative: parsed.messages.join('\n'),
+          patch: storyMap(_decodeStoryObject(raw)['continuityPatch']),
+          npcIds: {npcId},
+          privateNpcId: npcId,
+          checkpoint: {
+            'gameState': _gameStateFor(character.id).toJson(),
+            'mainMessageIds':
+                (_historyCache[character.id]?.messages ?? <ChatMessage>[])
+                    .map((m) => m.id)
+                    .toList(),
+            'gameplaySystem': character.gameplaySystem?.toJson(),
+            'mapState': (await _ensureMapState(character.id)).toJson()
+          });
+      nextContinuity = _captureNpcWorld(nextContinuity);
+      await _store.commitStoryWorkspace(
+          state: nextContinuity, npcProfiles: _npcProfiles);
+      _continuityCache[character.id] = nextContinuity;
       await _updateGamification(
         (state) => state
             .incrementStat('totalNpcReplies')
@@ -5663,8 +5756,14 @@ $instruction
       );
       return null;
     } on LlmApiException catch (error) {
+      _npcMessagesCache[npcId] = messages;
+      final index = _npcProfiles.indexWhere((p) => p.id == npcId);
+      if (index >= 0) _npcProfiles[index] = npc;
       return error.message;
     } catch (error) {
+      _npcMessagesCache[npcId] = messages;
+      final index = _npcProfiles.indexWhere((p) => p.id == npcId);
+      if (index >= 0) _npcProfiles[index] = npc;
       return 'NPC 回复失败：$error';
     } finally {
       _activeNpcReplyingId = null;
@@ -5695,7 +5794,8 @@ $instruction
     );
 
     _npcMessagesCache[npcId] = nextMessages;
-    await _store.saveNpcMessages(npcId, nextMessages);
+    await _saveNpcWorldMessages(npcId, nextMessages);
+    await _invalidateContinuitySources(_selectedCharacterId!, {messageId});
     notifyListeners();
   }
 
@@ -5764,7 +5864,7 @@ ${target.content}
         innerVoiceGeneratedAt: DateTime.now(),
       );
       _npcMessagesCache[npcId] = nextMessages;
-      await _store.saveNpcMessages(npcId, nextMessages);
+      await _saveNpcWorldMessages(npcId, nextMessages);
       return null;
     } on LlmApiException catch (error) {
       return error.message;
@@ -5786,7 +5886,8 @@ ${target.content}
     }
 
     _npcMessagesCache[npcId] = nextMessages;
-    await _store.saveNpcMessages(npcId, nextMessages);
+    await _saveNpcWorldMessages(npcId, nextMessages);
+    await _invalidateContinuitySources(_selectedCharacterId!, {messageId});
     notifyListeners();
   }
 
@@ -5810,8 +5911,10 @@ ${target.content}
     }
 
     _npcMessagesCache[npcId] = nextMessages;
-    await _store.saveNpcMessages(npcId, nextMessages);
+    await _saveNpcWorldMessages(npcId, nextMessages);
+    await _invalidateContinuitySources(_selectedCharacterId!, ids);
     if (notify) {
+      await _invalidateContinuitySources(_selectedCharacterId!, ids);
       notifyListeners();
     }
   }
@@ -5854,7 +5957,7 @@ ${target.content}
         .toList(growable: false);
 
     _npcMessagesCache[npcId] = trimmedMessages;
-    await _store.saveNpcMessages(npcId, trimmedMessages);
+    await _saveNpcWorldMessages(npcId, trimmedMessages);
     notifyListeners();
 
     return requestNpcReplyWithDirection(npcId, direction: direction);
@@ -5889,7 +5992,7 @@ ${target.content}
           .where((message) => message.id != directive.id)
           .toList(growable: false);
       _npcMessagesCache[npcId] = cleaned;
-      await _store.saveNpcMessages(npcId, cleaned);
+      await _saveNpcWorldMessages(npcId, cleaned);
     }
   }
 
@@ -6043,12 +6146,30 @@ ${target.content}
     _mapStateCache[character.id] = emptyMapState;
     _lastNpcExtractionMessageCounts.remove(character.id);
     final npcCleanup = _removeNpcProfilesForCharacterReset(character.id);
+    final priorContinuity = await _ensureContinuity(character.id);
+    final resetContinuity =
+        StoryContinuityState(characterId: character.id, data: {
+      'npcMigrationVersion': 1,
+      'directors': {'story': priorContinuity.directors['story'] ?? {}},
+      'npcWorlds': {
+        for (final npc in _npcProfilesForRuntime(character.id))
+          if (npc.hasReusableRoleCard) npc.id: priorContinuity.npcWorlds[npc.id]
+      }
+    });
+    await _store.commitStoryWorkspace(
+        state: resetContinuity,
+        history: emptyHistory,
+        memory: emptyMemory,
+        gameState: emptyGameState,
+        mapState: emptyMapState);
+    _continuityCache[character.id] = resetContinuity;
+    await _store.clearStoryReading(character.id);
     await _store.saveDialogueHistory(emptyHistory);
     await _store.saveCharacterMemory(emptyMemory);
     await _store.saveGameState(emptyGameState);
     await _store.saveMapState(emptyMapState);
     if (npcCleanup.changed) {
-      await _store.saveNpcProfiles(_npcProfiles);
+      await _persistNpcWorldProfiles();
       await _store.saveNpcMigrations(_npcMigrations);
       await _store.saveGamificationState(_gamification);
       for (final npcId in npcCleanup.removedNpcIds) {
@@ -6186,6 +6307,12 @@ ${target.content}
               Map<String, dynamic>.from(rawGamification))
           : null;
 
+      final importedContinuity = {
+        for (final e in readMap('continuity').entries)
+          e.key: StoryContinuityState(characterId: e.key, data: e.value)
+      };
+      final previousContinuity =
+          Map<String, StoryContinuityState>.from(_continuityCache);
       final importedHistories = <String, DialogueHistory>{};
       for (final entry in readMap('histories').entries) {
         final history = DialogueHistory.fromJson(entry.value);
@@ -6295,6 +6422,7 @@ ${target.content}
         _settingsPresets
           ..clear()
           ..addAll(importedPresets);
+        _continuityCache.clear();
         _historyCache.clear();
         _memoryCache.clear();
         _gameStateCache.clear();
@@ -6328,6 +6456,7 @@ ${target.content}
         }
       }
 
+      _continuityCache.addAll(importedContinuity);
       _historyCache.addAll(importedHistories);
       _memoryCache.addAll(importedMemories);
       _gameStateCache.addAll(importedGameStates);
@@ -6384,6 +6513,7 @@ ${target.content}
           worldBooks: _worldBooks,
           worldCalendarEvents: _worldCalendarEvents,
           gamification: _gamification,
+          continuity: _continuityCache,
           histories: _historyCache,
           memories: _memoryCache,
           gameStates: _gameStateCache,
@@ -6395,6 +6525,9 @@ ${target.content}
           deleteNpcIds: replaceExisting ? previousNpcIds : const <String>[],
         );
       } catch (error) {
+        _continuityCache
+          ..clear()
+          ..addAll(previousContinuity);
         _characters
           ..clear()
           ..addAll(previousCharacters);
@@ -6668,6 +6801,11 @@ ${target.content}
 
     final items = <DataStorageReportItem>[
       DataStorageReportItem(
+          label: '连续记忆与精修版本',
+          bytes: bytesForPrefix('story_continuity_') +
+              bytesForPrefix('story_reading_'),
+          description: '重要事实、人物知情、章节、分支快照、改写版本与阅读位置。'),
+      DataStorageReportItem(
         label: '角色与主聊天',
         bytes: bytesForExact('characters') +
             bytesForPrefix('history_') +
@@ -6810,7 +6948,7 @@ ${target.content}
     }
 
     await _store.saveWorldBooks(_worldBooks);
-    await _store.saveNpcProfiles(_npcProfiles);
+    await _persistNpcWorldProfiles();
     await _store.saveNpcMigrations(_npcMigrations);
     await _store.saveSaveSnapshots(_saveSnapshots);
     for (final state in _mapStateCache.values) {
@@ -6893,7 +7031,7 @@ ${target.content}
   Future<void> clearCurrentCharacterNpcMessages() async {
     for (final profile in currentWorldNpcProfiles) {
       _npcMessagesCache[profile.id] = const <NpcChatMessage>[];
-      await _store.saveNpcMessages(profile.id, const <NpcChatMessage>[]);
+      await _saveNpcWorldMessages(profile.id, const <NpcChatMessage>[]);
     }
     notifyListeners();
   }
@@ -7126,6 +7264,10 @@ ${target.content}
   }
 
   Future<String?> requestAssistantReply() async {
+    if (_storyOperationInProgress || (_isSending && !_closingStoryScene)) {
+      return '请先完成当前生成或改写。';
+    }
+
     final character = currentCharacter;
     if (character == null) {
       return '请先创建或选择一个角色。';
@@ -8139,6 +8281,7 @@ ${choices.trim().isEmpty ? '暂无。' : choices}
         mapState: nextMapState,
         gameState: nextGameState,
         history: nextHistory,
+        continuityPatch: _mapContinuityPatch(repairedResult),
       );
       return commitError;
     } on LlmApiException catch (error) {
@@ -8152,54 +8295,64 @@ ${choices.trim().isEmpty ? '暂无。' : choices}
     }
   }
 
+  Map<String, dynamic> _mapContinuityPatch(String content) {
+    final match =
+        RegExp(r'\[MAP_STATE\]([\s\S]*?)\[/MAP_STATE\]').firstMatch(content);
+    return match == null
+        ? {}
+        : storyMap(_decodeStoryObject(match.group(1)!)['continuityPatch']);
+  }
+
   Future<String?> _commitRulesMapNarrative({
     required String characterId,
     required MapWorldState mapState,
     required GameStateSnapshot gameState,
     required DialogueHistory history,
+    Map<String, dynamic> continuityPatch = const {},
   }) async {
-    Object? mapPersistError;
-    var mapPersisted = false;
+    final message = history.messages.last;
+    final prior = _captureNpcWorld(await _ensureContinuity(characterId));
+    final next = StoryContinuityEngine.apply(
+        state: prior,
+        eventId: message.id,
+        sourceIds: [message.id],
+        narrative: message.content,
+        patch: continuityPatch,
+        npcIds: _npcProfilesForRuntime(characterId).map((n) => n.id).toSet(),
+        checkpoint: {
+          'gameState': (await _ensureGameState(characterId)).toJson(),
+          'mapState': (await _ensureMapState(characterId)).toJson(),
+          'mapAfter': mapState.toJson(),
+          'mainMessageIds': history.messages
+              .take(history.messages.length - 1)
+              .map((m) => m.id)
+              .toList(),
+          'gameplaySystem':
+              _findCharacter(characterId)?.gameplaySystem?.toJson()
+        });
+    next.data['directors'] = next.directors..remove('turn');
+    next.data['mapState'] = mapState.toJson();
+    Object? failure;
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
-        await _store.saveMapState(mapState);
-        mapPersisted = true;
+        await _store.commitStoryWorkspace(
+            state: next,
+            history: history,
+            gameState: gameState,
+            mapState: mapState);
+        failure = null;
         break;
       } catch (error) {
-        mapPersistError = error;
+        failure = error;
       }
     }
-    if (!mapPersisted) {
-      return '地图状态保存失败，本回合未提交：$mapPersistError';
-    }
-
-    // The durable map write is the commit point. Later failures must not make
-    // the caller retry and resolve the same map turn twice.
+    if (failure != null) return '地图状态保存失败，本回合未提交：$failure';
+    _continuityCache[characterId] = next;
     _mapStateCache[characterId] = mapState;
     _gameStateCache[characterId] = gameState;
     _historyCache[characterId] = history;
-
+    _activeTurnDirective = null;
     final failures = <String>[];
-
-    Future<void> persistWithRetry(
-      String label,
-      Future<void> Function() persist,
-    ) async {
-      Object? lastError;
-      for (var attempt = 0; attempt < 2; attempt++) {
-        try {
-          await persist();
-          return;
-        } catch (error) {
-          lastError = error;
-        }
-      }
-      failures.add('$label: $lastError');
-    }
-
-    await persistWithRetry('游戏状态', () => _store.saveGameState(gameState));
-    await persistWithRetry('地图剧情记录', () => _store.saveDialogueHistory(history));
-
     try {
       await _applyGameStateNpcUpdates(characterId, gameState);
     } catch (error) {
@@ -8248,6 +8401,8 @@ ${choices.trim().isEmpty ? '暂无。' : choices}
 这是一次已经由 App 本地规则引擎完成确定性结算的正式地图回合。你只负责把结算事实写成连续、沉浸的主线剧情，并补充允许由叙事层维护的展示字段。
 
 叙事硬性要求：
+可在 MAP_STATE 对象中附加 continuityPatch 字段，其余规则不变。
+${StoryContinuityEngine.patchContract}
 1. 先输出不少于 2000 个中文字符的正式连续剧情正文，不要写成“结算说明”、规则日志、摘要列表或系统播报。
 2. 按用户行动顺序组织场景，把结算事实转成可见的动作、阻力、NPC 回应与后果；每场都有信息或关系变化。关键互动展开，重复移动简述，不能为凑篇幅添加新事件、隐秘线索或额外结算。与最近聊天、角色设定和世界书保持连续。
 3. 不得替用户追加其没有选择的关键决定，不得把未执行的行动写成已经发生。
@@ -9103,6 +9258,7 @@ title, stage, mainGoal, locations, edges, spawnCandidates, mapInventory, quests,
       _historyCache[character.id] = reconciled.history;
       await _store.saveDialogueHistory(reconciled.history);
     }
+    await _invalidateContinuitySources(character.id, {messageId});
     notifyListeners();
   }
 
@@ -9184,6 +9340,7 @@ title, stage, mainGoal, locations, edges, spawnCandidates, mapInventory, quests,
     );
     _historyCache[character.id] = reconciled.history;
     await _store.saveDialogueHistory(reconciled.history);
+    await _invalidateContinuitySources(character.id, {messageId});
     notifyListeners();
   }
 
@@ -9233,6 +9390,7 @@ title, stage, mainGoal, locations, edges, spawnCandidates, mapInventory, quests,
     );
     _historyCache[character.id] = reconciled.history;
     await _store.saveDialogueHistory(reconciled.history);
+    await _invalidateContinuitySources(character.id, ids);
     notifyListeners();
   }
 
@@ -10406,25 +10564,20 @@ ${_formatTranscript(recentMessages)}
       messages.length > 36 ? messages.sublist(messages.length - 36) : messages,
       npcName: npc.name,
     );
-    final mainMessages = _historyCache[character.id]?.messages ?? const [];
-    final mainTranscript = _formatTranscript(
-      mainMessages.length > 12
-          ? mainMessages.sublist(mainMessages.length - 12)
-          : mainMessages,
-    );
-    final worldBooks = _formatWorldBooksForPrompt(character.id);
+    final mainTranscript = _npcKnownContext(character.id, npc.id);
+    final worldBooks = _visibleWorldBooksForNpc(character.id, npc.id);
     final roleCard = npc.roleCard.trim();
 
     return '''
 当前主模拟器：${character.name}
 模拟器可见简介：
-${character.visibleBlurb}
+${character.name}
 
 世界书：
 $worldBooks
 
 当前用户角色：
-${userProfile == null ? '用户暂未创建或绑定用户角色，请按普通玩家处理。' : '${userProfile.name}\n${userProfile.persona}\n${userProfile.description}'}
+${userProfile == null || !userProfile.visibility.allows(npc.id) ? '未提供可知的玩家设定，以对话中明确告知的内容为准。' : '${userProfile.name}\n${userProfile.persona}\n${userProfile.description}'}
 
 当前 NPC：
 姓名：${npc.name}
@@ -10439,7 +10592,7 @@ ${userProfile == null ? '用户暂未创建或绑定用户角色，请按普通�
 羁绊进度：${npc.bondRoute.score}/100
 最近羁绊事件：${npc.bondRoute.latestEvent.trim().isEmpty ? '暂无。' : npc.bondRoute.latestEvent.trim()}
 
-最近主线片段，仅用于理解世界状态，不要直接推进主线：
+当前 NPC 有依据知道的内容，不直接推进主线：
 ${mainTranscript.trim().isEmpty ? '暂无主线记录。' : mainTranscript}
 
 NPC 私聊历史：
@@ -10448,6 +10601,9 @@ ${npcTranscript.trim().isEmpty ? '暂无。' : npcTranscript}
 本次用户连续发来的消息：
 ${pendingMessages.map((message) => '- ${message.content}').join('\n')}
 
+${StoryContinuityEngine.directorPrompt(_continuityCache[character.id] ?? StoryContinuityState(characterId: character.id), privateChat: true)}
+${StoryContinuityEngine.patchContract}
+当前NPC稳定ID：${npc.id}
 请生成 NPC 对本次消息的手机聊天式回复，并更新 NPC 对用户角色的印象。
 印象更新要求：
 - impressionPatch.summary 必须直接写简体中文自然句，不要输出 summary:、affinityDelta:、attitude: 这种英文标签。
@@ -11150,6 +11306,9 @@ messages 必须是 1-3 条简短手机聊天气泡。选一个 NPC 此刻有理�
 
     try {
       final previous = await _ensureMapState(character.id);
+      final previousGame = await _ensureGameState(character.id);
+      final beforeContinuity =
+          _captureNpcWorld(await _ensureContinuity(character.id));
       final raw = await _apiClient.runUtilityTask(
         settings: _settings,
         systemPrompt: _mapSystemPrompt,
@@ -11194,6 +11353,34 @@ messages 必须是 1-3 条简短手机聊天气泡。选一个 NPC 此刻有理�
         gameplayPatchExpected: character.gameplaySystem != null,
         turnId: _historyFor(character.id).messages.last.id,
       );
+      final last = _historyFor(character.id).messages.last;
+      var continuity = StoryContinuityEngine.apply(
+          state: beforeContinuity,
+          eventId: last.id,
+          sourceIds: [last.id],
+          narrative: last.content,
+          patch: _mapContinuityPatch(repairedResult),
+          npcIds: _npcProfilesForRuntime(character.id).map((n) => n.id).toSet(),
+          checkpoint: {
+            'gameState': previousGame.toJson(),
+            'mapState': previous.toJson(),
+            'mapAfter': nextState.toJson(),
+            'mainMessageIds': _historyFor(character.id)
+                .messages
+                .takeWhile((m) => m.id != last.id)
+                .map((m) => m.id)
+                .toList(),
+            'gameplaySystem': character.gameplaySystem?.toJson()
+          });
+      continuity = _captureNpcWorld(continuity);
+      continuity.data['mapState'] = nextState.toJson();
+      continuity.data['directors'] = continuity.directors..remove('turn');
+      await _store.commitStoryWorkspace(
+          state: continuity,
+          history: _historyFor(character.id),
+          gameState: _gameStateFor(character.id),
+          mapState: nextState);
+      _continuityCache[character.id] = continuity;
       await _applyMapMovementNpcMessages(character.id, nextState);
       _scheduleSummarization(character.id);
       _scheduleNpcExtraction(character.id);
@@ -12411,6 +12598,13 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
     var finalEpoch = originalHistory.promptCacheEpoch;
     var turnCommitted = false;
     try {
+      if (invalidatedMessageIds.isNotEmpty) {
+        final saved = await _ensureContinuity(character.id);
+        _storyContextOverride = StoryContinuityState(
+            characterId: character.id,
+            data: storyMap(
+                storyMap(saved.checkpoints[placeholderMessageId])['before']));
+      }
       prepared = await _planChatRequestMessages(
         character: character,
         messages: requestMessages,
@@ -12418,6 +12612,7 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
         requestTurnDirective: requestTurnDirective,
         gameStateOverride: gameStateOverride,
       );
+      _storyContextOverride = null;
       finalEpoch = prepared.epoch;
       final cacheOriginalHistory = originalHistory.copyWith(
         promptCacheEpoch: prepared.epoch,
@@ -12437,6 +12632,7 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
       _isSending = false;
       _cancelCurrentReply = false;
       notifyListeners();
+      _storyContextOverride = null;
       return '准备上下文失败：$error';
     }
     final replyCancellation = LlmCancellationToken();
@@ -12514,6 +12710,12 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
           requestMessages: replayRequestMessages,
           previousGameState: prepared.gameState,
           npcProfiles: prepared.npcProfiles,
+          continuityOverride: invalidatedMessageIds.isEmpty
+              ? null
+              : StoryContinuityState(
+                  characterId: character.id,
+                  data: storyMap(storyMap(_continuityCache[character.id]
+                      ?.checkpoints[placeholderMessageId])['before'])),
           cancellationToken: replyCancellation,
         );
         if (_cancelCurrentReply) {
@@ -12572,7 +12774,9 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
               content: finalContent,
               previous: prepared.gameState,
             );
-      if (!_cancelCurrentReply && character.gameplaySystem != null) {
+      if (!_cancelCurrentReply &&
+          !_closingStoryScene &&
+          character.gameplaySystem != null) {
         parsedGameState = _applyGameplayPatchToState(
           character: character,
           previousState: prepared.gameState,
@@ -12581,6 +12785,10 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
           content: finalContent,
           patchExpected: true,
         );
+      }
+      if (_closingStoryScene && !_cancelCurrentReply) {
+        parsedGameState =
+            prepared.gameState.copyWith(npcUpdates: [], npcChanges: []);
       }
       if (parsedGameState != null) {
         finalHistory = _replaceMessageContent(
@@ -12634,11 +12842,24 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
       if (parsedGameState != null) {
         _gameStateCache[character.id] = parsedGameState;
       }
+      final nextContinuity = _cancelCurrentReply
+          ? null
+          : await _continuityForCompletedTurn(
+              character.id,
+              placeholderMessageId,
+              finalContent,
+              prepared.gameState,
+              _pendingContinuityPatches.remove(character.id) ?? {});
       await _store.commitTurnState(
         history: finalHistory,
         gameState: parsedGameState,
         memory: invalidatedMemory,
+        continuity: nextContinuity,
       );
+      if (nextContinuity != null) {
+        _continuityCache[character.id] = nextContinuity;
+        _activeTurnDirective = null;
+      }
       turnCommitted = true;
       if (repairedTimeline != null) {
         await _rebuildTimelineAutoNpcs(
@@ -12822,6 +13043,7 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
     required GameStateSnapshot previousGameState,
     required List<NpcProfile> npcProfiles,
     required LlmCancellationToken cancellationToken,
+    StoryContinuityState? continuityOverride,
   }) async {
     if (character.isTutorialDemo) {
       return content;
@@ -12839,17 +13061,19 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
         systemPrompt: TurnStateAdjudicator.buildSystemPrompt(
           gameplayPatchRequired: character.gameplaySystem != null,
         ),
-        userPrompt: TurnStateAdjudicator.buildUserPrompt(
+        userPrompt: '${TurnStateAdjudicator.buildUserPrompt(
           character: character,
           previousState: previousGameState,
           npcProfiles: npcProfiles,
           latestUserMessage: latestUserMessage,
           narrativeReply: MessageContentParser.contextTextForModel(content),
-        ),
+        )}\n已有连续性记录（沿用事实 key，固定记录只能提出冲突）：\n${jsonEncode((continuityOverride ?? _storyContext(character.id)).activeFacts)}',
         temperature: 0.12,
         topP: 0.8,
         cancellationToken: cancellationToken,
       );
+      _pendingContinuityPatches[character.id] =
+          storyMap(_decodeStoryObject(raw)['continuityPatch']);
       final adjudication = TurnStateAdjudicator.parse(
         raw,
         gameplayPatchRequired: character.gameplaySystem != null,
@@ -13651,7 +13875,7 @@ F|做一个意外但仍合理的行动，打破当前僵局。
         return;
       }
 
-      await _store.saveNpcProfiles(_npcProfiles);
+      await _persistNpcWorldProfiles();
       final createdCount = _npcProfiles.length - beforeCount;
       if (createdCount > 0) {
         await _updateGamification(
@@ -13720,9 +13944,23 @@ F|做一个意外但仍合理的行动，打破当前僵局。
   }
 
   Future<void> _loadCharacterState(String characterId) async {
+    await _activateStoryWorld(characterId);
     final history = await _store.loadDialogueHistory(characterId);
     if (history.replayNeedsMigration) await _store.saveDialogueHistory(history);
     _historyCache[characterId] = history;
+    final loadedContinuity = await _ensureContinuity(characterId);
+    final availableSources = {
+      ...history.messages.map((m) => m.id),
+      ...loadedContinuity.npcWorlds.values.expand((raw) =>
+          NpcWorldState.fromJson(storyMap(raw)).messages.map((m) => m.id))
+    };
+    final missingSources = loadedContinuity.activeFacts
+        .expand((f) => storyStrings(f['sourceIds']))
+        .where((id) => !availableSources.contains(id))
+        .toSet();
+    if (missingSources.isNotEmpty) {
+      await _invalidateContinuitySources(characterId, missingSources);
+    }
     _memoryCache[characterId] = await _store.loadCharacterMemory(characterId);
     var gameState = await _store.loadGameState(characterId);
     final gameplaySystem = _findCharacter(characterId)?.gameplaySystem;
@@ -14213,7 +14451,7 @@ F|做一个意外但仍合理的行动，打破当前僵局。
       );
     }
     _npcProfiles.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    await _store.saveNpcProfiles(_npcProfiles);
+    await _persistNpcWorldProfiles();
   }
 
   bool _canTimelineReplayUpdateNpc(NpcProfile profile, String characterId) {
@@ -14497,7 +14735,7 @@ F|做一个意外但仍合理的行动，打破当前僵局。
             ),
           ];
           _npcMessagesCache[next.id] = nextMessages;
-          await _store.saveNpcMessages(next.id, nextMessages);
+          await _saveNpcWorldMessages(next.id, nextMessages);
           deliveredMessageCount += 1;
           deliveredNpcNames.add(next.name);
         }
@@ -14507,13 +14745,13 @@ F|做一个意外但仍合理的行动，打破当前僵局。
     if (profilesChanged) {
       _npcProfiles.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
       if (persist) {
-        await _store.saveNpcProfiles(_npcProfiles);
+        await _persistNpcWorldProfiles();
       }
       final maxBondScore = _npcProfiles
           .where((profile) => profile.characterId == characterId)
           .fold<int>(
               0, (value, profile) => max(value, profile.bondRoute.score));
-      if (maxBondScore > 0) {
+      if (persist && updateGamification && maxBondScore > 0) {
         await _noteNpcBondScore(maxBondScore);
       }
     }
@@ -14688,9 +14926,9 @@ F|做一个意外但仍合理的行动，打破当前僵局。
         ),
       ];
       _npcMessagesCache[selectedNpc.id] = nextMessages;
-      await _store.saveNpcMessages(selectedNpc.id, nextMessages);
+      await _saveNpcWorldMessages(selectedNpc.id, nextMessages);
       _touchNpcProfile(latestProfile);
-      await _store.saveNpcProfiles(_npcProfiles);
+      await _persistNpcWorldProfiles();
       await _updateGamification(
         (state) => state
             .incrementStat('totalNpcProactiveMessages', bubbles.length)
@@ -14759,14 +14997,14 @@ F|做一个意外但仍合理的行动，打破当前僵局。
         ),
       ];
       _npcMessagesCache[npc.id] = nextMessages;
-      await _store.saveNpcMessages(npc.id, nextMessages);
+      await _saveNpcWorldMessages(npc.id, nextMessages);
       _npcProfiles[npcIndex] = npc.copyWith(updatedAt: now);
       savedAny = true;
     }
 
     if (savedAny) {
       _npcProfiles.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-      await _store.saveNpcProfiles(_npcProfiles);
+      await _persistNpcWorldProfiles();
       await _updateGamification(
         (state) =>
             state.setStatMax('maxNpcUnreadMessages', currentNpcUnreadCount),
@@ -14852,11 +15090,15 @@ F|做一个意外但仍合理的行动，打破当前僵局。
   }
 
   Future<List<NpcChatMessage>> _ensureNpcMessages(String npcId) async {
-    if (_npcMessagesCache.containsKey(npcId)) {
-      return _npcMessagesCache[npcId]!;
-    }
-
-    final messages = await _store.loadNpcMessages(npcId);
+    if (_npcMessagesCache.containsKey(npcId)) return _npcMessagesCache[npcId]!;
+    final id = _selectedCharacterId;
+    final state = id == null ? null : await _ensureContinuity(id);
+    final raw = storyMap(state?.npcWorlds[npcId]);
+    final messages = raw.isNotEmpty
+        ? NpcWorldState.fromJson(raw).messages
+        : (id != null && npcProfileById(npcId)?.characterId == id
+            ? await _store.loadNpcMessages(npcId)
+            : <NpcChatMessage>[]);
     _npcMessagesCache[npcId] = messages;
     return messages;
   }
@@ -14939,9 +15181,9 @@ F|做一个意外但仍合理的行动，打破当前僵局。
         ),
       ];
       _npcMessagesCache[npc.id] = nextMessages;
-      await _store.saveNpcMessages(npc.id, nextMessages);
+      await _saveNpcWorldMessages(npc.id, nextMessages);
       _touchNpcProfile(npc);
-      await _store.saveNpcProfiles(_npcProfiles);
+      await _persistNpcWorldProfiles();
       await _updateGamification(
         (state) => state
             .incrementStat('totalNpcLetters')
@@ -14968,15 +15210,12 @@ F|做一个意外但仍合理的行动，打破当前僵局。
     required bool useDailyFreeLetter,
     String sourceLabel = '',
   }) {
-    final recentMessages = history.messages.length > 16
-        ? history.messages.sublist(history.messages.length - 16)
-        : history.messages;
-    final transcript = _formatTranscript(recentMessages);
+    final transcript = _npcKnownContext(character.id, npc.id);
     final npcTranscript = _formatNpcTranscript(
       messages.length > 12 ? messages.sublist(messages.length - 12) : messages,
       npcName: npc.name,
     );
-    final worldBooks = _formatWorldBooksForPrompt(character.id);
+    final worldBooks = _visibleWorldBooksForNpc(character.id, npc.id);
 
     return '''
 任务：生成一封 NPC 主动来信。
@@ -14984,7 +15223,7 @@ F|做一个意外但仍合理的行动，打破当前僵局。
 
 当前 AI 角色：${character.name}
 角色简介：
-${character.visibleBlurb}
+${character.name}
 
 世界书：
 $worldBooks
@@ -14996,12 +15235,13 @@ $worldBooks
 当前印象：${npc.impression.trim().isEmpty ? '暂无明确印象。' : npc.impression.trim()}
 生命周期：${npc.lifecycle.label}
 
-主线最近剧情：
+这个 NPC 有依据知道的剧情：
 $transcript
 
 NPC 私聊最近记录：
 ${npcTranscript.trim().isEmpty ? '暂无。' : npcTranscript}
 
+${StoryContinuityEngine.directorPrompt(_continuityCache[character.id] ?? StoryContinuityState(characterId: character.id), privateChat: true)}
 请让这个 NPC 主动发来 1-3 条手机聊天气泡。必须自然、短一点、像真的临时想起用户角色。
 不要推进主线回合，不要制造重大事件，不要写旁白。不要写“等待回复中”“明日将收到来信”“计划表白”等状态，只能写 NPC 真的会发出的聊天原话。
 ''';
@@ -16351,12 +16591,14 @@ ${NpcMigrationMemoryMode.label(memoryMode)}
     final selectedIds = scope == 'all'
         ? _characters.map((item) => item.id).toSet()
         : safeCharacterIds;
+    final continuity = <String, dynamic>{};
     final histories = <String, dynamic>{};
     final memories = <String, dynamic>{};
     final gameStates = <String, dynamic>{};
     final mapStates = <String, dynamic>{};
 
     for (final characterId in selectedIds) {
+      continuity[characterId] = (await _ensureContinuity(characterId)).toJson();
       histories[characterId] = (await _ensureHistory(characterId)).toJson();
       memories[characterId] = (await _ensureMemory(characterId)).toJson();
       gameStates[characterId] = (await _ensureGameState(characterId)).toJson();
@@ -16442,6 +16684,7 @@ ${NpcMigrationMemoryMode.label(memoryMode)}
             .where((character) => selectedIds.contains(character.id))
             .map((character) => character.toJson())
             .toList(),
+        'continuity': continuity,
         'histories': histories,
         'memories': memories,
         'gameStates': gameStates,
@@ -17091,6 +17334,12 @@ ${NpcMigrationMemoryMode.label(memoryMode)}
     GameplaySystem? gameplaySystemOverride,
   }) {
     final parts = <String>[];
+    final continuity = _storyContext(characterId);
+    {
+      parts.add(StoryContinuityEngine.directorPrompt(continuity));
+      parts.add('【连续性事实】\n${StoryContinuityEngine.factsPrompt(continuity)}');
+      parts.add(_npcKnowledgePrompt(continuity));
+    }
     final directive = directiveOverride ?? _activeTurnDirective;
     if (directive != null && !directive.isEmpty) {
       parts.add('【剧情导演台】\n${directive.toPrompt()}');
@@ -17950,6 +18199,7 @@ ${NpcMigrationMemoryMode.label(memoryMode)}
     final entry = WorldBookEntry(
       title: draft.title.trim(),
       content: draft.content.trim(),
+      visibility: draft.visibility,
       global: draft.global,
       tags: _normalizeWorldBookTags(draft.tags),
       boundCharacterIds: _validBoundCharacterIds(draft.boundCharacterIds),
@@ -17974,6 +18224,7 @@ ${NpcMigrationMemoryMode.label(memoryMode)}
     _worldBooks[index] = _worldBooks[index].copyWith(
       title: draft.title.trim(),
       content: draft.content.trim(),
+      visibility: draft.visibility,
       global: draft.global,
       tags: _normalizeWorldBookTags(draft.tags),
       boundCharacterIds: _validBoundCharacterIds(draft.boundCharacterIds),

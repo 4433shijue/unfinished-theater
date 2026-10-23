@@ -1,3 +1,5 @@
+import '../models/story_continuity.dart';
+import '../widgets/story_workbench.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -264,12 +266,14 @@ class _UserProfileEditorDialogState extends State<_UserProfileEditorDialog> {
   late final TextEditingController _personaController;
   late final Set<String> _boundCharacterIds;
   late String _avatarDataUri;
+  StoryVisibility _storyVisibility = const StoryVisibility();
   String? _avatarError;
 
   @override
   void initState() {
     super.initState();
     final initial = widget.initialProfile;
+    _storyVisibility = initial?.visibility ?? const StoryVisibility();
     _nameController = TextEditingController(text: initial?.name ?? '');
     _genderController = TextEditingController(text: initial?.gender ?? '');
     _descriptionController =
@@ -316,6 +320,10 @@ class _UserProfileEditorDialogState extends State<_UserProfileEditorDialog> {
                           }),
                 ),
                 const SizedBox(height: 14),
+                StoryVisibilityEditor(
+                    value: _storyVisibility,
+                    onChanged: (v) => setState(() => _storyVisibility = v)),
+                const SizedBox(height: 12),
                 TextFormField(
                   controller: _nameController,
                   decoration: InputDecoration(
@@ -419,6 +427,7 @@ class _UserProfileEditorDialogState extends State<_UserProfileEditorDialog> {
 
     Navigator.of(context).pop(
       UserProfileDraft(
+        visibility: _storyVisibility,
         name: _nameController.text.trim(),
         avatarDataUri: _avatarDataUri.trim(),
         gender: _genderController.text.trim(),

@@ -1,3 +1,4 @@
+import 'story_continuity.dart';
 import '../utils/id_generator.dart';
 
 const String legacyDefaultWorldBookContent = '''
@@ -75,6 +76,7 @@ class WorldBookEntry {
     required this.global,
     this.tags = const <String>[],
     this.boundCharacterIds = const <String>[],
+    this.visibility = const StoryVisibility(),
     this.triggerMode = WorldBookTriggerMode.always,
     this.keywords = const <String>[],
     this.regexPattern = '',
@@ -107,6 +109,7 @@ class WorldBookEntry {
     final rawContent = json['content']?.toString() ?? '';
     return WorldBookEntry(
       id: json['id']?.toString(),
+      visibility: StoryVisibility.fromJson(json['visibility']),
       title: json['title']?.toString() ?? '未命名世界书',
       content: rawContent.replaceFirst(RegExp(r'^\s*八[.、．]\s*'), ''),
       global: json['global'] == true,
@@ -144,6 +147,7 @@ class WorldBookEntry {
   final bool global;
   final List<String> tags;
   final List<String> boundCharacterIds;
+  final StoryVisibility visibility;
   final WorldBookTriggerMode triggerMode;
   final List<String> keywords;
   final String regexPattern;
@@ -162,6 +166,7 @@ class WorldBookEntry {
     bool? global,
     List<String>? tags,
     List<String>? boundCharacterIds,
+    StoryVisibility? visibility,
     WorldBookTriggerMode? triggerMode,
     List<String>? keywords,
     String? regexPattern,
@@ -171,6 +176,7 @@ class WorldBookEntry {
   }) {
     return WorldBookEntry(
       id: id,
+      visibility: visibility ?? this.visibility,
       title: title ?? this.title,
       content: content ?? this.content,
       global: global ?? this.global,
@@ -194,6 +200,7 @@ class WorldBookEntry {
       'global': global,
       'tags': tags,
       'boundCharacterIds': boundCharacterIds,
+      'visibility': visibility.toJson(),
       'triggerMode': triggerMode.name,
       'keywords': keywords,
       'regexPattern': regexPattern,
@@ -230,6 +237,7 @@ class WorldBookDraft {
     required this.global,
     this.tags = const <String>[],
     required this.boundCharacterIds,
+    this.visibility = const StoryVisibility(),
     required this.triggerMode,
     this.keywords = const <String>[],
     this.regexPattern = '',
@@ -242,6 +250,7 @@ class WorldBookDraft {
   final bool global;
   final List<String> tags;
   final List<String> boundCharacterIds;
+  final StoryVisibility visibility;
   final WorldBookTriggerMode triggerMode;
   final List<String> keywords;
   final String regexPattern;
