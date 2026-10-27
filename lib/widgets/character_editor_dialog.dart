@@ -1,3 +1,4 @@
+import 'story_surface.dart';
 import '../models/story_advanced_settings.dart';
 import '../models/story_opening_draft.dart';
 import 'story_creation_editors.dart';
@@ -143,8 +144,7 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
       math.min(680.0, size.width - (compact ? 36.0 : 72.0)),
     );
 
-    return AlertDialog(
-      backgroundColor: theme.colorScheme.surface.withValues(alpha: 1),
+    return StoryAlertDialog(
       insetPadding: EdgeInsets.symmetric(
         horizontal: compact ? 14 : 28,
         vertical: compact ? 18 : 24,

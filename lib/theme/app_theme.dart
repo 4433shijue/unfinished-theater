@@ -1530,6 +1530,28 @@ class AppTheme {
     );
   }
 
+  /// Story overlays use the same panel language with an opaque reading surface.
+  static BoxDecoration storySurface(
+      {bool opaque = false, bool highlighted = false}) {
+    final panel = glassPanel(
+        highlighted: highlighted,
+        radius: _activeRuntimeTheme?.radius ?? (opaque ? 24 : 16));
+    final gradient = panel.gradient! as LinearGradient;
+    return panel.copyWith(
+      gradient: opaque
+          ? LinearGradient(
+              begin: gradient.begin,
+              end: gradient.end,
+              colors:
+                  gradient.colors.map((c) => c.withValues(alpha: 1)).toList())
+          : gradient,
+      borderRadius: _activeRuntimeTheme?.radius == null
+          ? panel.borderRadius
+          : BorderRadius.circular(_activeRuntimeTheme!.radius!),
+      boxShadow: opaque ? panel.boxShadow : const [],
+    );
+  }
+
   static BoxDecoration glassPanel({
     bool highlighted = false,
     double radius = 24,

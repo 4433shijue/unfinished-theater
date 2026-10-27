@@ -1,3 +1,4 @@
+import 'story_surface.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -43,11 +44,12 @@ class _VariableEditorState extends State<_VariableEditor> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
+  Widget build(BuildContext context) => StoryAlertDialog(
         title: Text('编辑 ${widget.variable.label}'),
         content: SizedBox(
           width: 560,
           child: SingleChildScrollView(
+            padding: const EdgeInsets.only(top: 8),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [

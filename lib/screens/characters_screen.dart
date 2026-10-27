@@ -117,7 +117,8 @@ class CharactersScreen extends StatelessWidget {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(AppTheme.glitchText('角色已创建')),
-            action: createdCharacter == null
+            action: createdCharacter == null ||
+                    createdCharacter.gameplaySystem != null
                 ? null
                 : SnackBarAction(
                     label: AppTheme.glitchText('生成玩法'),

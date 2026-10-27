@@ -1,3 +1,4 @@
+import 'package:ai_roleplay_chat/theme/app_theme.dart';
 // Isolated mock data; no provider calls or user saves.
 import 'dart:convert';
 import 'dart:io';
@@ -60,6 +61,38 @@ void main() {
       ..createSync(recursive: true);
     File('${dir.path}/seed.json').writeAsStringSync(jsonEncode(data));
     File('${dir.path}/mock.json').writeAsStringSync(jsonEncode({
+      'uiLabels': {
+        for (final variant in AppThemeVariant.values)
+          variant.id: (() {
+            AppTheme.themeFor(variant.id);
+            return {
+              for (final label in [
+                '打开未完剧场',
+                '输入你的消息，开始和角色对话...',
+                '输入消息...',
+                '发送',
+                '发送消息',
+                '提交并生成回复',
+                '继续阅读',
+                '关闭结算',
+                '角色',
+                '新建角色',
+                '帮你写',
+                '文游灵感',
+                '高级设置 长期生效的叙事偏好与指令约束',
+                '额外指令（原样保存）',
+                '生成提示词',
+                '作者查看 · 含剧透',
+                '重新生成此人',
+                '编辑人物',
+                '取消',
+                '创建角色',
+                'NPC'
+              ])
+                label: AppTheme.glitchText(label)
+            };
+          })()
+      },
       'judgment': judgment,
       'narrative': narrative,
       'worldId': c.currentCharacter!.id,

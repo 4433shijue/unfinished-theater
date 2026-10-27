@@ -49,7 +49,7 @@ const ReleaseNotes currentReleaseNotes = ReleaseNotes(
     ReleaseNoteItem(
         icon: Icons.receipt_long_outlined,
         title: '每回合结算，一眼看清变化',
-        description: '统一查看变量、道具、好感、人物事件和承诺变化；关闭后可从消息再次查看。'),
+        description: '手机与桌面均以居中小窗展示变化；窗口和新增编辑界面跟随当前皮肤，关闭后可从消息重看。'),
     ReleaseNoteItem(
         icon: Icons.history,
         title: '读档与回退带回当时的世界',

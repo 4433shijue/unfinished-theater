@@ -81,7 +81,7 @@ class _NpcProfileEditorDialogState extends State<_NpcProfileEditorDialog> {
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     final compact = size.width < 620;
-    return AlertDialog(
+    return StoryAlertDialog(
       title: Text(
           AppTheme.glitchText(widget.profile == null ? '新建 NPC' : '编辑 NPC')),
       content: SizedBox(
@@ -96,7 +96,7 @@ class _NpcProfileEditorDialogState extends State<_NpcProfileEditorDialog> {
               children: <Widget>[
                 if (widget.profile != null &&
                     widget.profile!.storyState.publicIdentity.isNotEmpty)
-                  ExpansionTile(title: const Text('剧情档案'), children: [
+                  StoryExpansionSection(title: const Text('剧情档案'), children: [
                     Text(
                         '身份：${widget.profile!.storyState.publicIdentity}\n性格：${widget.profile!.storyState.personality}\n立场：${widget.profile!.storyState.stance}\n信任：${widget.profile!.runtimeState.trust}'),
                     for (final relation in widget.profile!.storyState.relations

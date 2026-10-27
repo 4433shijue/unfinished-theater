@@ -1,3 +1,5 @@
+import 'story_surface.dart';
+import '../theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../controllers/app_state_controller.dart';
@@ -8,26 +10,12 @@ Future<void> showTurnSettlement(
   final controller = context.read<AppStateController>();
   final child = ChangeNotifierProvider.value(
       value: controller, child: TurnSettlementPanel(settlement: settlement));
-  if (MediaQuery.sizeOf(context).width < 600) {
-    await showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor:
-            Theme.of(context).colorScheme.surface.withValues(alpha: 1),
-        useSafeArea: true,
-        builder: (c) =>
-            SizedBox(height: MediaQuery.sizeOf(c).height * .78, child: child));
-  } else {
-    await showDialog<void>(
-        context: context,
-        builder: (c) => Dialog(
-            backgroundColor:
-                Theme.of(c).colorScheme.surface.withValues(alpha: 1),
-            child: ConstrainedBox(
-                constraints:
-                    const BoxConstraints(maxWidth: 620, maxHeight: 720),
-                child: child)));
-  }
+  await showDialog<void>(
+    context: context,
+    useRootNavigator: true,
+    builder: (c) => StoryDialog(
+        maxWidth: 500, maxHeight: 620, heightFraction: .72, child: child),
+  );
 }
 
 class TurnSettlementPanel extends StatefulWidget {
@@ -55,6 +43,7 @@ class _TurnSettlementPanelState extends State<TurnSettlementPanel> {
                         style: Theme.of(context).textTheme.titleLarge)),
                 IconButton(
                     tooltip: '关闭结算',
+                    style: AppTheme.skinIconButtonStyle(),
                     onPressed: _busy ? null : () => Navigator.pop(context),
                     icon: const Icon(Icons.close))
               ]),
@@ -75,8 +64,12 @@ class _TurnSettlementPanelState extends State<TurnSettlementPanel> {
                       Padding(
                           padding: const EdgeInsets.only(top: 14, bottom: 6),
                           child: Text(category,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold))),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleSmall
+                                  ?.copyWith(
+                                      color: AppTheme.activeSoft,
+                                      fontWeight: FontWeight.bold))),
                       for (final e
                           in s.entries.where((e) => e['category'] == category))
                         Padding(
@@ -90,7 +83,9 @@ class _TurnSettlementPanelState extends State<TurnSettlementPanel> {
                                     Text('${e['reason']}',
                                         style: Theme.of(context)
                                             .textTheme
-                                            .bodySmall),
+                                            .bodySmall
+                                            ?.copyWith(
+                                                color: AppTheme.textMuted)),
                                 ]))
                     ],
                     if (_error != null)

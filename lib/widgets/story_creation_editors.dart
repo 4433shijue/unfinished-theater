@@ -1,3 +1,5 @@
+import 'story_surface.dart';
+import '../theme/app_theme.dart';
 import 'gameplay_draft_editors.dart';
 import 'package:flutter/material.dart';
 import '../models/story_advanced_settings.dart';
@@ -9,7 +11,7 @@ class StoryAdvancedSettingsEditor extends StatelessWidget {
   final StoryAdvancedSettings value;
   final ValueChanged<StoryAdvancedSettings> onChanged;
   @override
-  Widget build(BuildContext context) => ExpansionTile(
+  Widget build(BuildContext context) => StoryExpansionSection(
           title: const Text('高级设置'),
           subtitle: const Text('长期生效的叙事偏好与指令约束'),
           childrenPadding: const EdgeInsets.all(12),
@@ -57,6 +59,7 @@ class StoryAdvancedSettingsEditor extends StatelessWidget {
           padding: const EdgeInsets.only(bottom: 12),
           child: DropdownButtonFormField<String>(
               initialValue: current,
+              dropdownColor: AppTheme.panel.withValues(alpha: 1),
               decoration: InputDecoration(labelText: label),
               isExpanded: true,
               items: choices.entries
@@ -104,8 +107,9 @@ class _StoryOpeningEditorState extends State<StoryOpeningEditor> {
   Widget build(BuildContext context) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const SizedBox(height: 16),
-        const Text('开局预览',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        Text('开局预览',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: AppTheme.activeSoft, fontWeight: FontWeight.bold)),
         const Text('人物、物品和玩法将随世界一起保存。锁定的部分不会重新生成。'),
         if (widget.supplementOnly) ...[
           const Text('勾选需要补充的内容；已有的同名人物、物品和玩法会保留。'),
@@ -130,7 +134,8 @@ class _StoryOpeningEditorState extends State<StoryOpeningEditor> {
                   {...widget.value.toJson(), 'includeGameplay': v}))),
         ],
         for (final n in widget.value.npcs)
-          Card(
+          StorySection(
+              highlighted: _locked.contains('npc:${n['id']}'),
               child: ExpansionTile(
                   title: Text('${n['name']}'),
                   subtitle:
@@ -138,45 +143,49 @@ class _StoryOpeningEditorState extends State<StoryOpeningEditor> {
                   childrenPadding: const EdgeInsets.all(12),
                   expandedCrossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                Text(
-                    '性格：${n['personality'] ?? ''}\n初始关系：${n['affinityReason'] ?? ''}\n当前目标：${n['goal'] ?? ''}\n开场${n['appeared'] == true ? '登场' : '尚未登场'}'),
-                ExpansionTile(title: const Text('作者查看 · 含剧透'), children: [
-                  Text(
-                      '真实身份：${n['trueIdentity'] ?? ''}\n秘密：${n['secret'] ?? ''}'),
-                  const Text('查看不会让玩家角色提前知情。')
-                ]),
-                Wrap(spacing: 8, children: [
-                  FilterChip(
-                      label: Text(
-                          _locked.contains('npc:${n['id']}') ? '已锁定' : '锁定人物'),
-                      selected: _locked.contains('npc:${n['id']}'),
-                      onSelected: (v) => setState(() => v
-                          ? _locked.add('npc:${n['id']}')
-                          : _locked.remove('npc:${n['id']}'))),
-                  TextButton(
-                      onPressed: widget.busy
-                          ? null
-                          : () async {
-                              final result = await _edit(context, n, npc: true);
-                              if (result != null) {
-                                _replace(
-                                    'npcs',
-                                    widget.value.npcs
-                                        .map((v) =>
-                                            v['id'] == n['id'] ? result : v)
-                                        .toList());
-                              }
-                            },
-                      child: const Text('编辑人物')),
-                  TextButton(
-                      onPressed:
-                          widget.busy || _locked.contains('npc:${n['id']}')
+                    Text(
+                        '性格：${n['personality'] ?? ''}\n初始关系：${n['affinityReason'] ?? ''}\n当前目标：${n['goal'] ?? ''}\n开场${n['appeared'] == true ? '登场' : '尚未登场'}'),
+                    StoryExpansionSection(
+                        title: const Text('作者查看 · 含剧透'),
+                        children: [
+                          Text(
+                              '真实身份：${n['trueIdentity'] ?? ''}\n秘密：${n['secret'] ?? ''}'),
+                          const Text('查看不会让玩家角色提前知情。')
+                        ]),
+                    Wrap(spacing: 8, children: [
+                      FilterChip(
+                          label: Text(_locked.contains('npc:${n['id']}')
+                              ? '已锁定'
+                              : '锁定人物'),
+                          selected: _locked.contains('npc:${n['id']}'),
+                          onSelected: (v) => setState(() => v
+                              ? _locked.add('npc:${n['id']}')
+                              : _locked.remove('npc:${n['id']}'))),
+                      TextButton(
+                          onPressed: widget.busy
                               ? null
-                              : () => widget.onRegenerate('npc:${n['id']}'),
-                      child: const Text('重新生成此人')),
-                ])
-              ])),
-        ExpansionTile(
+                              : () async {
+                                  final result =
+                                      await _edit(context, n, npc: true);
+                                  if (result != null) {
+                                    _replace(
+                                        'npcs',
+                                        widget.value.npcs
+                                            .map((v) =>
+                                                v['id'] == n['id'] ? result : v)
+                                            .toList());
+                                  }
+                                },
+                          child: const Text('编辑人物')),
+                      TextButton(
+                          onPressed:
+                              widget.busy || _locked.contains('npc:${n['id']}')
+                                  ? null
+                                  : () => widget.onRegenerate('npc:${n['id']}'),
+                          child: const Text('重新生成此人')),
+                    ])
+                  ])),
+        StoryExpansionSection(
             title: Text('人物关系 · ${widget.value.relationships.length} 条'),
             children: [
               for (final r in widget.value.relationships)
@@ -203,7 +212,7 @@ class _StoryOpeningEditorState extends State<StoryOpeningEditor> {
                         })),
               _sectionActions('relationships', '关系')
             ]),
-        ExpansionTile(
+        StoryExpansionSection(
             title: Text('初始物品 · ${widget.value.items.length} 件'),
             children: [
               for (final item in widget.value.items)
@@ -226,7 +235,7 @@ class _StoryOpeningEditorState extends State<StoryOpeningEditor> {
                         })),
               _sectionActions('items', '物品')
             ]),
-        ExpansionTile(
+        StoryExpansionSection(
             title: Text('初始玩法 · ${widget.value.gameplay?.title ?? '等待生成'}'),
             children: [
               Text(widget.value.gameplay?.summary ?? ''),
@@ -294,7 +303,7 @@ class _StoryOpeningEditorState extends State<StoryOpeningEditor> {
     final result = await showDialog<Map<String, dynamic>>(
         context: context,
         builder: (c) => StatefulBuilder(
-            builder: (c, set) => AlertDialog(
+            builder: (c, set) => StoryAlertDialog(
                     title: const Text('编辑关系 · 作者设定'),
                     content: Column(mainAxisSize: MainAxisSize.min, children: [
                       TextField(
@@ -350,28 +359,32 @@ class _StoryOpeningEditorState extends State<StoryOpeningEditor> {
     final result = await showDialog<Map<String, dynamic>>(
         context: context,
         builder: (c) => StatefulBuilder(
-            builder: (c, set) => AlertDialog(
+            builder: (c, set) => StoryAlertDialog(
                     title: Text(npc ? '编辑人物 · 作者设定' : '编辑初始物品'),
                     content: SizedBox(
                         width: 520,
                         child: SingleChildScrollView(
+                            padding: const EdgeInsets.only(top: 8),
                             child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                              for (final e in fields.entries)
-                                Padding(
-                                    padding: const EdgeInsets.only(bottom: 12),
-                                    child: TextField(
-                                        controller: controllers[e.key],
-                                        decoration:
-                                            InputDecoration(labelText: e.value),
-                                        maxLines: e.key == 'secret' ? 3 : 1)),
-                              if (npc)
-                                SwitchListTile(
-                                    title: const Text('开场登场'),
-                                    value: appeared,
-                                    onChanged: (v) => set(() => appeared = v))
-                            ]))),
+                                  for (final e in fields.entries)
+                                    Padding(
+                                        padding:
+                                            const EdgeInsets.only(bottom: 12),
+                                        child: TextField(
+                                            controller: controllers[e.key],
+                                            decoration: InputDecoration(
+                                                labelText: e.value),
+                                            maxLines:
+                                                e.key == 'secret' ? 3 : 1)),
+                                  if (npc)
+                                    SwitchListTile(
+                                        title: const Text('开场登场'),
+                                        value: appeared,
+                                        onChanged: (v) =>
+                                            set(() => appeared = v))
+                                ]))),
                     actions: [
                       TextButton(
                           onPressed: () => Navigator.pop(c),
