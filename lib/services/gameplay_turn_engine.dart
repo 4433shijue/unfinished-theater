@@ -1,3 +1,4 @@
+import 'message_content_parser.dart';
 import 'dart:convert';
 
 import '../models/game_state.dart';
@@ -127,7 +128,11 @@ class GameplayTurnEngine {
     }
 
     for (final operation in parsed.threads.take(8)) {
-      final result = _applyThread(threads, operation, turn);
+      final result = _applyThread(
+          threads,
+          _verifiedDeadline(operation,
+              MessageContentParser.contextTextForModel(content), turn),
+          turn);
       if (result.error != null) {
         warnings.add(result.error!);
         continue;
@@ -219,6 +224,8 @@ class GameplayTurnEngine {
             id: operation.id,
             title: operation.title,
             description: operation.description,
+            dueTurn: operation.dueTurn,
+            deadline: operation.deadline,
             reason: operation.reason.isEmpty ? rule.effect : operation.reason,
             visibility: _public(rule.visibility)
                 ? operation.visibility
@@ -525,6 +532,35 @@ class GameplayTurnEngine {
     return null;
   }
 
+  static GameplayThreadOperation _verifiedDeadline(
+      GameplayThreadOperation operation, String narrative, int turn) {
+    final deadline =
+        operation.deadline.isNotEmpty && narrative.contains(operation.deadline)
+            ? operation.deadline
+            : '';
+    int? due;
+    if (deadline.isNotEmpty) {
+      final absolute = RegExp(r'第\s*(\d+)\s*回合').firstMatch(deadline);
+      final relative = RegExp(r'(\d+)\s*回合(?:后|内)').firstMatch(deadline);
+      if (absolute != null) {
+        due = int.tryParse(absolute.group(1)!);
+      } else if (relative != null) {
+        due = turn + int.parse(relative.group(1)!);
+      } else if (deadline.contains('下回合') || deadline.contains('下一回合')) {
+        due = turn + 1;
+      }
+    }
+    return GameplayThreadOperation(
+        op: operation.op,
+        id: operation.id,
+        title: operation.title,
+        description: operation.description,
+        reason: operation.reason,
+        visibility: operation.visibility,
+        deadline: deadline,
+        dueTurn: due);
+  }
+
   static ({
     List<GameplayStoryThread> threads,
     GameplayStoryThread? changed,
@@ -564,6 +600,8 @@ class GameplayTurnEngine {
           id: id,
           title: operation.title.trim(),
           description: operation.description.trim(),
+          dueTurn: operation.dueTurn,
+          deadline: operation.deadline,
           reason: reason,
           visibility: operation.visibility,
           openedTurn: turn,

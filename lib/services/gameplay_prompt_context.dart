@@ -107,7 +107,7 @@ class GameplayPromptContext {
   static const threadInstructions = '承诺与余波使用 THEATER_PATCH 的 threads 数组，支持 '
       '{"op":"open|resolve|break","id":"稳定短ID","title":"事项名称",'
       '"description":"来由及具体待兑现条件","reason":"本轮正文中实际发生的依据",'
-      '"visibility":"public|director"}。只记重要且明确发生的承诺、人情或持续后果，'
+      '"visibility":"public|director","deadline":"正文中明确约定的期限原话；未约定留空"}。只记重要且明确发生的承诺、人情或持续后果，'
       '不得把猜测、愿望或一般任务自动认定为承诺；不得凭道德评价判定违背。'
       '已存在的事项必须复用 ID，只在本轮事实满足兑现或违背条件时 resolve/break，'
       '无新事实时 threads 为空。title 用具体事项命名，description 写清谁做了什么、还待兑现什么，'

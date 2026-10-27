@@ -375,10 +375,10 @@ B|离开
     final staticPrompt = capture.messages.first['content'] as String;
     final userTurn = capture.messages.last['content'] as String;
     expect(staticPrompt, contains('【主聊天叙事长度｜轻小说正文】'));
-    expect(staticPrompt, contains('硬性下限为 2000 个中文字符'));
-    expect(staticPrompt, contains('正式剧情推进时纯文字正文不少于 2000 个中文字符'));
+    expect(staticPrompt, contains('目标 2200-3200 个中文字符，下限 2000 字'));
+    expect(staticPrompt, contains('正式剧情推进时纯文字剧情正文目标 2200-3200'));
     expect(staticPrompt, contains('HTML、状态块和选项不计入正文长度'));
-    expect(userTurn, isNot(contains('正式剧情推进时纯文字正文不少于 2000 个中文字符')));
+    expect(userTurn, isNot(contains('正式剧情推进时纯文字剧情正文目标 2200-3200')));
     expect(userTurn, isNot(contains('HTML、状态块和选项不计入正文长度')));
   });
 

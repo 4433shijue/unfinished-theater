@@ -97,6 +97,9 @@ class NpcWorldState {
         'legacyBaseline': legacyBaseline,
       };
   static const runtimeKeys = <String>[
+    'storyState',
+    'name',
+    'description',
     'affinity',
     'impression',
     'lifecycle',

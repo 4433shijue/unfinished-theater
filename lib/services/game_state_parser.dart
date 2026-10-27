@@ -251,11 +251,25 @@ class GameStateParser {
           const <String>['剧情物品栏', '剧情物品', 'storyInventory'],
         ) ??
         const <String>[];
-    final storyInventory = _mergeStoryItems(
-      previous.storyInventory,
-      inventory,
-      parsedStoryInventory,
-    );
+    final structuredRaw = _findValue(values, '剧情物品栏') ??
+        _findValue(values, '剧情物品') ??
+        _findValue(values, 'storyInventory');
+    final structured =
+        structuredRaw is List && structuredRaw.every((item) => item is Map);
+    final storyInventory = structured
+        ? structuredRaw
+            .map((raw) {
+              final data = Map<String, dynamic>.from(raw as Map);
+              final old = previous.storyInventory
+                  .where((item) =>
+                      item.id == data['id'] || item.name == data['name'])
+                  .firstOrNull;
+              return StoryInventoryItem.fromJson({...?old?.toJson(), ...data});
+            })
+            .where((item) => item.name.trim().isNotEmpty && item.quantity > 0)
+            .toList()
+        : _mergeStoryItems(
+            previous.storyInventory, inventory, parsedStoryInventory);
 
     return previous.copyWith(
       characterId: characterId,
@@ -290,7 +304,9 @@ class GameStateParser {
       completedTasks: _readList(
               values, const <String>['已完成任务', '完成任务', 'completedTasks']) ??
           previous.completedTasks,
-      inventory: inventory,
+      inventory: structured
+          ? storyInventory.map((item) => item.name).toList()
+          : inventory,
       storyInventory: storyInventory,
       eventTitle: _readString(
             values,

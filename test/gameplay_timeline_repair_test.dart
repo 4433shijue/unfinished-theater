@@ -157,7 +157,9 @@ void main() {
     expect(beforeRecords, isNotEmpty);
     client.replies.add(_replyWithoutPatch());
 
-    expect(await controller.regenerateAssistantMessage(target.id), isNull);
+    expect(await controller.regenerateAssistantMessage(target.id),
+        contains('结算未完成'));
+    expect(controller.pendingTurnSettlement, isNotNull);
     final repaired = controller.currentHistory.messages.last;
     expect(
         (repaired.gameStateSnapshot!['gameplayVariableRecords'] as List?) ?? [],

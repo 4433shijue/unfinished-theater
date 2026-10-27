@@ -92,9 +92,15 @@ class CharactersScreen extends StatelessWidget {
     CharacterProfile? initialCharacter,
   }) async {
     final draft = await showDialog<CharacterDraft>(
+      barrierDismissible: false,
       context: context,
       builder: (context) => CharacterEditorDialog(
         initialCharacter: initialCharacter,
+        onSave: (draft) => initialCharacter == null
+            ? context.read<AppStateController>().createCharacter(draft)
+            : context
+                .read<AppStateController>()
+                .updateCharacter(initialCharacter.id, draft),
         onGenerateSimulatorPrompt:
             context.read<AppStateController>().generateSimulatorPrompt,
       ),
@@ -106,7 +112,6 @@ class CharactersScreen extends StatelessWidget {
 
     final controller = context.read<AppStateController>();
     if (initialCharacter == null) {
-      await controller.createCharacter(draft);
       if (context.mounted) {
         final createdCharacter = controller.currentCharacter;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -127,7 +132,6 @@ class CharactersScreen extends StatelessWidget {
       return;
     }
 
-    await controller.updateCharacter(initialCharacter.id, draft);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(AppTheme.glitchText('角色已更新'))),
@@ -418,9 +422,13 @@ class _CharacterTile extends StatelessWidget {
                           icon: Icons.edit_outlined,
                           onTap: () async {
                             final draft = await showDialog<CharacterDraft>(
+                              barrierDismissible: false,
                               context: context,
                               builder: (context) => CharacterEditorDialog(
                                 initialCharacter: character,
+                                onSave: (draft) => context
+                                    .read<AppStateController>()
+                                    .updateCharacter(character.id, draft),
                                 onGenerateSimulatorPrompt: context
                                     .read<AppStateController>()
                                     .generateSimulatorPrompt,
@@ -430,9 +438,6 @@ class _CharacterTile extends StatelessWidget {
                               return;
                             }
 
-                            await context
-                                .read<AppStateController>()
-                                .updateCharacter(character.id, draft);
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(

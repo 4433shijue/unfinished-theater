@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'gameplay_system_prompt.dart';
 import '../models/simulator_prompt_request.dart';
 
 const String simulatorPromptGeneratorSystemPrompt = '''
@@ -10,7 +12,7 @@ const String simulatorPromptGeneratorSystemPrompt = '''
   "opening": "开场白正文",
   "systemPrompt": "完整系统提示词正文"
 }
-四个键必须齐全，值都必须是非空字符串。字符串内的换行、引号和反斜杠要正确转义，不要用 null、数组或嵌套对象代替正文。
+四个基础键必须齐全，值都必须是非空字符串。用户要求结构化开局时，额外提供 openingDraft 对象。字符串内的换行、引号和反斜杠要正确转义，不要用 null、数组或嵌套对象代替正文。
 
 内容要求：
 - 开场白直接写玩家眼前的处境，给出可回应的问题或行动机会。通过具体的人物、环境和动作建立氛围，不写欢迎语或功能介绍。可以用 {user} 代指玩家。
@@ -59,6 +61,8 @@ NPC 规则适配外部注入的角色卡。绑定 NPC 作为同行者或重要�
   return '''
 请将以下资料整理为可直接给 AI 角色使用的设定与运行规则，并按规定 JSON 结构交付。
 
+${request.advancedSettings.toPrompt()}
+${request.includeOpening ? storyOpeningGenerationContract(request) : ''}
 【模拟器灵感】
 ${request.simulatorIdea.trim()}
 
@@ -81,7 +85,7 @@ $modeInstruction
 
 生成要求：
 1. 这是一个文字游戏模拟器的角色提示词，不是直接开始扮演。
-2. 输出必须是完整 JSON，键名固定为 name / description / opening / systemPrompt，四个值都必须是非空字符串；systemPrompt 只写设定与运行规则，不重复抄写其他三个字段。
+2. 输出必须是完整 JSON，基础键名为 name / description / opening / systemPrompt，四个值都必须是非空字符串；systemPrompt 只写设定与运行规则，不重复抄写其他三个字段。
 3. 第一回合规则要说明：玩家未做初始选择前，不得正式推进剧情，只能展示开局引导和待确认信息。
 4. 开场白适合第一次打开角色时直接展示。让玩家看见自己面对的处境和可回应的第一步，篇幅简短，不罗列功能菜单。
 5. HTML 美化窗口只生成非正史互动番外，不能承载状态、变量、任务或背包面板；具体主题和交互规则由 App 的每回合番外设置提供。
@@ -92,3 +96,16 @@ $modeInstruction
 9. 如果本次是“只生成世界观”，请优先输出设定集式提示词：少写玩法壳，多写世界运行逻辑、规则、势力、文化、矛盾和可进入接口。
 ''';
 }
+
+String storyOpeningGenerationContract(
+        SimulatorPromptGenerationRequest request) =>
+    '''
+【结构化开局，必须额外提供 openingDraft 对象】
+四个基础字符串仍需保留。另附 openingDraft，不能只在 systemPrompt 里描述人物和数值：
+{"npcs":[{"id":"稳定短ID","name":"公开姓名","publicIdentity":"公开身份","trueIdentity":"真实身份，可留空","personality":"性格","secret":"秘密，可留空","secretRevealed":false,"appeared":true,"faction":"阵营","goal":"当前目标","stance":"对玩家的立场","affinity":0,"affinityReason":"初始关系原因"}],"relationships":[{"from":"人物ID","to":"人物ID","label":"关系","public":false}],"items":[{"id":"item_1","name":"物品名","quantity":1,"description":"公开说明","source":"开局携带"}],"gameplaySystem":{}}
+人物数量：${request.advancedSettings.npcCount == 0 ? '3—6' : request.advancedSettings.npcCount}；全员有不同目标，只安排少数人在开场登场。未揭露的秘密只放 trueIdentity/secret，禁止写入公开简介、开场、systemPrompt、publicIdentity 或人物公开关系。不要把好感、任务、物品重复做成玩法变量。
+gameplaySystem 遵循以下既有玩法约定，但作为 openingDraft 的内嵌对象返回：
+$gameplaySystemGeneratorPrompt
+${request.existingOpening == null ? '' : '现有开局（保留稳定 ID）：${jsonEncode(request.existingOpening!.toJson())}'}
+${request.regenerateSection.isEmpty ? '' : '本次只调整指定部分 ${request.regenerateSection}，其余字段原样保留。'}
+''';

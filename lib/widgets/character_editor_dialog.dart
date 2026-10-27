@@ -1,3 +1,6 @@
+import '../models/story_advanced_settings.dart';
+import '../models/story_opening_draft.dart';
+import 'story_creation_editors.dart';
 import '../models/inline_theater_settings.dart';
 import 'inline_theater_settings_editor.dart';
 import 'dart:math' as math;
@@ -24,10 +27,12 @@ class CharacterEditorDialog extends StatefulWidget {
   const CharacterEditorDialog({
     super.key,
     this.initialCharacter,
+    this.onSave,
     this.onGenerateSimulatorPrompt,
   });
 
   final CharacterProfile? initialCharacter;
+  final Future<void> Function(CharacterDraft draft)? onSave;
   final Future<SimulatorPromptGenerationResult> Function(
     SimulatorPromptGenerationRequest request, {
     void Function(String partial)? onChunk,
@@ -53,6 +58,9 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
   late final TextEditingController _styleHintController;
   late final TextEditingController _extraConstraintsController;
 
+  StoryAdvancedSettings _advancedSettings = const StoryAdvancedSettings();
+  StoryOpeningDraft? _openingDraft;
+  final Set<String> _openingLocks = {};
   late double _temperature;
   late double _topP;
   late int _contextLengthIndex;
@@ -67,8 +75,10 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
   _CharacterCreationMode _creationMode = _CharacterCreationMode.manual;
   SimulatorPromptGenerationMode _generationMode =
       SimulatorPromptGenerationMode.fullSimulator;
+  bool _includeWorldOpening = false;
   bool _isGeneratingPrompt = false;
   String? _generatorError;
+  bool _isSaving = false;
   String _uploadedDocumentName = '';
   String _uploadedDocumentText = '';
   final ValueNotifier<String> _generatingPromptNotifier =
@@ -83,6 +93,8 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
   void initState() {
     super.initState();
     final initial = widget.initialCharacter;
+    _advancedSettings =
+        initial?.advancedSettings ?? const StoryAdvancedSettings();
     final params = initial?.modelParams ?? ModelParams.defaults();
     _nameController = TextEditingController(text: initial?.name ?? '');
     _nameController.addListener(_refreshAvatarPreview);
@@ -132,6 +144,7 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
     );
 
     return AlertDialog(
+      backgroundColor: theme.colorScheme.surface.withValues(alpha: 1),
       insetPadding: EdgeInsets.symmetric(
         horizontal: compact ? 14 : 28,
         vertical: compact ? 18 : 24,
@@ -271,6 +284,44 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
                 else
                   _buildManualPromptSection(context),
                 const SizedBox(height: 26),
+                if (_generationMode == SimulatorPromptGenerationMode.worldStage)
+                  SwitchListTile(
+                      value: _includeWorldOpening,
+                      onChanged: (v) =>
+                          setState(() => _includeWorldOpening = v),
+                      title: const Text('同时生成世界原生人物与玩法')),
+                Wrap(spacing: 8, children: [
+                  for (final e in const {
+                    'name': '名称',
+                    'opening': '开场白',
+                    'systemPrompt': '游戏设定'
+                  }.entries)
+                    FilterChip(
+                        label: Text('锁定${e.value}'),
+                        selected: _openingLocks.contains(e.key),
+                        onSelected: (v) => setState(() => v
+                            ? _openingLocks.add(e.key)
+                            : _openingLocks.remove(e.key)))
+                ]),
+                StoryAdvancedSettingsEditor(
+                    value: _advancedSettings,
+                    onChanged: (v) => setState(() => _advancedSettings = v)),
+                if (_openingDraft != null)
+                  StoryOpeningEditor(
+                      supplementOnly: _isEditing,
+                      value: _openingDraft!,
+                      locked: _openingLocks,
+                      busy: _isGeneratingPrompt,
+                      onChanged: (v) => setState(() => _openingDraft = v),
+                      onRegenerate: _regenerateOpeningSection),
+                if (!_isGeneratorMode &&
+                    widget.onGenerateSimulatorPrompt != null)
+                  TextButton(
+                      onPressed:
+                          _isGeneratingPrompt ? null : _generateManualOpening,
+                      child: Text(_isEditing
+                          ? '补全开局（仅添加缺少的人物、物品与玩法）'
+                          : '生成开局人物、物品与玩法')),
                 const _SectionLabel(title: '模型参数'),
                 const SizedBox(height: 14),
                 _SliderField(
@@ -390,13 +441,19 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
         ),
       ),
       actions: [
+        if (_generatorError != null)
+          Text(_generatorError!,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: theme.colorScheme.error)),
         TextButton(
-          onPressed:
-              _isGeneratingPrompt ? null : () => Navigator.of(context).pop(),
+          onPressed: _isGeneratingPrompt || _isSaving
+              ? null
+              : () => Navigator.of(context).pop(),
           child: Text(AppTheme.glitchText('取消')),
         ),
         FilledButton(
-          onPressed: _isGeneratingPrompt ? null : _submit,
+          onPressed: _isGeneratingPrompt || _isSaving ? null : _submit,
           child: Text(AppTheme.glitchText(_isEditing ? '保存修改' : '创建角色')),
         ),
       ],
@@ -758,6 +815,10 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
     try {
       final result = await widget.onGenerateSimulatorPrompt!(
         SimulatorPromptGenerationRequest(
+          advancedSettings: _advancedSettings,
+          includeOpening:
+              _generationMode == SimulatorPromptGenerationMode.fullSimulator ||
+                  _includeWorldOpening,
           roleName: name,
           simulatorIdea: idea,
           shortDescription: _descriptionController.text.trim(),
@@ -774,13 +835,20 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
       }
 
       setState(() {
-        _promptController.text = result.prompt;
-        _openingMessageController.text = result.openingMessage;
+        _openingDraft = _mergeLockedOpening(result.openingDraft);
+        if (!_openingLocks.contains('systemPrompt')) {
+          _promptController.text = result.prompt;
+        }
+        if (!_openingLocks.contains('opening')) {
+          _openingMessageController.text = result.openingMessage;
+        }
         final generatedName = result.name.trim().isNotEmpty
             ? result.name
             : (_extractGeneratedSimulatorName(result.prompt) ?? '');
         if (generatedName.isNotEmpty) {
-          _nameController.text = generatedName;
+          if (!_openingLocks.contains('name')) {
+            _nameController.text = generatedName;
+          }
         }
         if (_descriptionController.text.trim().isEmpty) {
           _descriptionController.text = result.description;
@@ -844,7 +912,7 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
     } catch (_) {
       // 流式中间态 JSON 不完整，走原始文本展示。
     }
-    return trimmed;
+    return '正在整理世界与人物档案，完成后会展示公开预览。';
   }
 
   Future<void> _generateBlindBoxSimulatorPrompt() async {
@@ -875,6 +943,10 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
     try {
       final result = await widget.onGenerateSimulatorPrompt!(
         SimulatorPromptGenerationRequest(
+          advancedSettings: _advancedSettings,
+          includeOpening:
+              _generationMode == SimulatorPromptGenerationMode.fullSimulator ||
+                  _includeWorldOpening,
           roleName: fallbackName,
           simulatorIdea: blindBoxInstruction,
           shortDescription: '',
@@ -892,13 +964,20 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
       }
 
       setState(() {
-        _promptController.text = result.prompt;
-        _openingMessageController.text = result.openingMessage;
+        _openingDraft = _mergeLockedOpening(result.openingDraft);
+        if (!_openingLocks.contains('systemPrompt')) {
+          _promptController.text = result.prompt;
+        }
+        if (!_openingLocks.contains('opening')) {
+          _openingMessageController.text = result.openingMessage;
+        }
         final generatedName = result.name.trim().isNotEmpty
             ? result.name
             : (_extractGeneratedSimulatorName(result.prompt) ?? '');
         if (generatedName.isNotEmpty) {
-          _nameController.text = generatedName;
+          if (!_openingLocks.contains('name')) {
+            _nameController.text = generatedName;
+          }
         }
         if (_descriptionController.text.trim().isEmpty) {
           _descriptionController.text = result.description;
@@ -947,6 +1026,10 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
     try {
       final result = await widget.onGenerateSimulatorPrompt!(
         SimulatorPromptGenerationRequest(
+          advancedSettings: _advancedSettings,
+          includeOpening:
+              _generationMode == SimulatorPromptGenerationMode.fullSimulator ||
+                  _includeWorldOpening,
           roleName: fallbackName,
           simulatorIdea: blindBoxInstruction,
           shortDescription: '',
@@ -964,13 +1047,20 @@ class _CharacterEditorDialogState extends State<CharacterEditorDialog> {
       }
 
       setState(() {
-        _promptController.text = result.prompt;
-        _openingMessageController.text = result.openingMessage;
+        _openingDraft = _mergeLockedOpening(result.openingDraft);
+        if (!_openingLocks.contains('systemPrompt')) {
+          _promptController.text = result.prompt;
+        }
+        if (!_openingLocks.contains('opening')) {
+          _openingMessageController.text = result.openingMessage;
+        }
         final generatedName = result.name.trim().isNotEmpty
             ? result.name
             : (_extractGeneratedSimulatorName(result.prompt) ?? '');
         if (generatedName.isNotEmpty) {
-          _nameController.text = generatedName;
+          if (!_openingLocks.contains('name')) {
+            _nameController.text = generatedName;
+          }
         }
         if (_descriptionController.text.trim().isEmpty) {
           _descriptionController.text = result.description;
@@ -1022,6 +1112,8 @@ $rawPrompt
     try {
       final result = await widget.onGenerateSimulatorPrompt!(
         SimulatorPromptGenerationRequest(
+          advancedSettings: _advancedSettings,
+          includeOpening: false,
           roleName: name,
           simulatorIdea: polishIdea,
           shortDescription: _descriptionController.text.trim(),
@@ -1038,13 +1130,19 @@ $rawPrompt
       }
 
       setState(() {
-        _promptController.text = result.prompt;
-        _openingMessageController.text = result.openingMessage;
+        if (!_openingLocks.contains('systemPrompt')) {
+          _promptController.text = result.prompt;
+        }
+        if (!_openingLocks.contains('opening')) {
+          _openingMessageController.text = result.openingMessage;
+        }
         final generatedName = result.name.trim().isNotEmpty
             ? result.name
             : (_extractGeneratedSimulatorName(result.prompt) ?? '');
         if (generatedName.isNotEmpty) {
-          _nameController.text = generatedName;
+          if (!_openingLocks.contains('name')) {
+            _nameController.text = generatedName;
+          }
         }
         if (_descriptionController.text.trim().isEmpty) {
           _descriptionController.text = result.description;
@@ -1260,8 +1358,97 @@ $rawPrompt
     return value.replaceAll(RegExp(r'[《》「」"“”]'), '').trim();
   }
 
-  void _submit() {
+  StoryOpeningDraft? _mergeLockedOpening(StoryOpeningDraft? incoming) {
+    final old = _openingDraft;
+    if (old == null || incoming == null) return incoming;
+    final data = incoming.toJson();
+    for (final key in _openingLocks.where((k) =>
+        const ['items', 'relationships', 'gameplaySystem'].contains(k))) {
+      data[key] = old.data[key];
+    }
+    final locked = old.npcs
+        .where((n) => _openingLocks.contains('npc:${n['id']}'))
+        .toList();
+    if (locked.isNotEmpty) {
+      final incomingNpcs = incoming.npcs;
+      data['npcs'] = [
+        for (final n in incomingNpcs)
+          locked.where((v) => v['id'] == n['id']).firstOrNull ?? n,
+        ...locked.where((n) => !incomingNpcs.any((v) => v['id'] == n['id']))
+      ];
+    }
+    return StoryOpeningDraft(data);
+  }
+
+  Future<void> _generateManualOpening() async {
+    _simulatorIdeaController.text = _promptController.text;
+    await _regenerateOpeningSection('all');
+  }
+
+  Future<void> _regenerateOpeningSection(String section) async {
+    if (widget.onGenerateSimulatorPrompt == null || _isGeneratingPrompt) return;
+    final before = _openingDraft;
+    setState(() {
+      _isGeneratingPrompt = true;
+      _generatorError = null;
+    });
+    try {
+      final result = await widget.onGenerateSimulatorPrompt!(
+          SimulatorPromptGenerationRequest(
+              roleName: _nameController.text,
+              simulatorIdea: _promptController.text.isEmpty
+                  ? _simulatorIdeaController.text
+                  : _promptController.text,
+              advancedSettings: _advancedSettings,
+              includeOpening: true,
+              existingOpening: before,
+              regenerateSection: section,
+              extraConstraints: _extraConstraintsController.text));
+      if (!mounted) return;
+      final generated = result.openingDraft;
+      if (generated == null) throw const FormatException('模型没有返回开局草案。');
+      setState(() {
+        if (before == null || section == 'all') {
+          _openingDraft = generated;
+        } else if (section.startsWith('npc:')) {
+          final id = section.substring(4);
+          final replacement =
+              generated.npcs.where((n) => n['id'] == id).firstOrNull;
+          if (replacement == null) {
+            throw const FormatException('重新生成的人物未保留原 ID。');
+          }
+          _openingDraft = StoryOpeningDraft({
+            ...before.toJson(),
+            'npcs':
+                before.npcs.map((n) => n['id'] == id ? replacement : n).toList()
+          });
+        } else {
+          _openingDraft = StoryOpeningDraft(
+              {...before.toJson(), section: generated.data[section]});
+        }
+      });
+    } catch (e) {
+      if (mounted) setState(() => _generatorError = '$e');
+    } finally {
+      if (mounted) setState(() => _isGeneratingPrompt = false);
+    }
+  }
+
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) {
+      return;
+    }
+    final errors =
+        _openingDraft?.validate(npcCount: _advancedSettings.npcCount) ??
+            <String>[];
+    if (errors.isNotEmpty) {
+      setState(() => _generatorError = errors.join('\n'));
+      return;
+    }
+    if (_isGeneratorMode &&
+        _generationMode == SimulatorPromptGenerationMode.fullSimulator &&
+        _openingDraft == null) {
+      setState(() => _generatorError = '请先生成完整开局。');
       return;
     }
     var submittedName = _nameController.text.trim();
@@ -1272,33 +1459,42 @@ $rawPrompt
               : '未命名模拟器');
     }
 
-    Navigator.of(context).pop(
-      CharacterDraft(
-        name: submittedName,
-        description: _isPromptLocked
-            ? widget.initialCharacter!.description
-            : _descriptionController.text.trim(),
-        openingMessage: _openingMessageController.text.trim(),
-        prompt: _isPromptLocked
-            ? widget.initialCharacter!.prompt
-            : _promptController.text.trim(),
-        hiddenPrompt: _isPromptLocked
-            ? widget.initialCharacter!.hiddenPrompt
-            : simulatorRuntimeProtocolPrompt,
-        inlineTheaterSettings: _inlineTheaterSettings,
-        streamingOutputEnabled: _streamingOutputEnabled,
-        segmentedOutputEnabled: _segmentedOutputEnabled,
-        nextStepOptionsEnabled: _nextStepOptionsEnabled,
-        mapModeEnabled: _mapModeEnabled,
-        largeGroupChatModeEnabled: _largeGroupChatModeEnabled,
-        avatarDataUri: _avatarDataUri,
-        modelParams: ModelParams(
-          temperature: double.parse(_temperature.toStringAsFixed(2)),
-          topP: double.parse(_topP.toStringAsFixed(2)),
-          contextLength: _selectedContextLength ?? 0,
-        ),
+    final draft = CharacterDraft(
+      advancedSettings: _advancedSettings,
+      openingDraft: _openingDraft,
+      name: submittedName,
+      description: _isPromptLocked
+          ? widget.initialCharacter!.description
+          : _descriptionController.text.trim(),
+      openingMessage: _openingMessageController.text.trim(),
+      prompt: _isPromptLocked
+          ? widget.initialCharacter!.prompt
+          : _promptController.text.trim(),
+      hiddenPrompt: _isPromptLocked
+          ? widget.initialCharacter!.hiddenPrompt
+          : simulatorRuntimeProtocolPrompt,
+      inlineTheaterSettings: _inlineTheaterSettings,
+      streamingOutputEnabled: _streamingOutputEnabled,
+      segmentedOutputEnabled: _segmentedOutputEnabled,
+      nextStepOptionsEnabled: _nextStepOptionsEnabled,
+      mapModeEnabled: _mapModeEnabled,
+      largeGroupChatModeEnabled: _largeGroupChatModeEnabled,
+      avatarDataUri: _avatarDataUri,
+      modelParams: ModelParams(
+        temperature: double.parse(_temperature.toStringAsFixed(2)),
+        topP: double.parse(_topP.toStringAsFixed(2)),
+        contextLength: _selectedContextLength ?? 0,
       ),
     );
+    setState(() => _isSaving = true);
+    try {
+      await widget.onSave?.call(draft);
+      if (mounted) Navigator.of(context).pop(draft);
+    } catch (e) {
+      if (mounted) setState(() => _generatorError = '保存失败，草稿已保留：$e');
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   String get _dialogTitle {

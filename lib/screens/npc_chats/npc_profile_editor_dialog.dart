@@ -94,6 +94,29 @@ class _NpcProfileEditorDialogState extends State<_NpcProfileEditorDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
+                if (widget.profile != null &&
+                    widget.profile!.storyState.publicIdentity.isNotEmpty)
+                  ExpansionTile(title: const Text('剧情档案'), children: [
+                    Text(
+                        '身份：${widget.profile!.storyState.publicIdentity}\n性格：${widget.profile!.storyState.personality}\n立场：${widget.profile!.storyState.stance}\n信任：${widget.profile!.runtimeState.trust}'),
+                    for (final relation in widget.profile!.storyState.relations
+                        .where((r) =>
+                            r['public'] == true &&
+                            context
+                                    .read<AppStateController>()
+                                    .npcProfileById(
+                                        r['targetId']?.toString() ?? '')
+                                    ?.storyState
+                                    .appeared ==
+                                true))
+                      Text(
+                          '${context.read<AppStateController>().npcProfileById(relation['targetId']?.toString() ?? '')?.name ?? '已知人物'}：${relation['label']}'),
+                    for (final change in widget.profile!.storyState.changes
+                        .where((r) => r['public'] == true))
+                      Text('${change['summary']}'),
+                    if (widget.profile!.storyState.secretRevealed)
+                      Text('已揭露：${widget.profile!.storyState.secret}'),
+                  ]),
                 _NpcAvatarPicker(
                   name: _nameController.text,
                   avatarDataUri: _avatarDataUri,

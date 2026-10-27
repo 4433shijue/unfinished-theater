@@ -1,7 +1,7 @@
 name: ai_roleplay_chat
 description: Privacy-first AI roleplay chat application for Android and Web.
 publish_to: 'none'
-version: 2.14.0+2140
+version: 2.15.0+2150
 
 environment:
   sdk: '>=3.4.0 <4.0.0'

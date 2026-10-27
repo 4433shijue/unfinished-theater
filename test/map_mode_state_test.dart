@@ -280,7 +280,7 @@ void main() {
     );
     expect(client.userPrompt, contains('结算前 MAP_STATE'));
     expect(client.userPrompt, contains('本地结算后 MAP_STATE（权威）'));
-    expect(client.userPrompt, contains('不少于 2000 个中文字符'));
+    expect(client.userPrompt, contains('2200-3200 字目标'));
     expect(client.userPrompt, contains('本地规则结算日志'));
     expect(
       client.userPrompt.indexOf(plannedAction),
@@ -383,7 +383,11 @@ void main() {
       timeStep: '下一回合',
     );
 
-    expect(error, isNull);
+    expect(error, contains('结算未完成'));
+    expect(
+        await controller
+            .retryTurnSettlement(controller.currentHistory.messages.last.id),
+        isNull);
     expect(store.injectedFailures, 1);
     expect(controller.currentMapState.turnNumber, turnBefore + 1);
     final persistedMap = await LocalStore().loadMapState(character.id);
@@ -438,7 +442,11 @@ void main() {
       timeStep: '下一回合',
     );
 
-    expect(error, contains('本回合未提交'));
+    expect(error, contains('结算未完成'));
+    expect(
+        await controller
+            .retryTurnSettlement(controller.currentHistory.messages.last.id),
+        contains('结算未完成'));
     expect(store.injectedFailures, 2);
     expect(jsonEncode(controller.currentMapState.toJson()), beforeMap);
     expect(jsonEncode(controller.currentGameState.toJson()), beforeGame);
@@ -446,7 +454,9 @@ void main() {
     final afterHistory = await LocalStore().loadDialogueHistory(character.id);
     expect(jsonEncode(afterMap.toJson()), beforeMap);
     expect(
-      afterHistory.messages.map((message) => message.id),
+      afterHistory.messages
+          .take(beforeHistory.messages.length)
+          .map((message) => message.id),
       beforeHistory.messages.map((message) => message.id),
     );
   });

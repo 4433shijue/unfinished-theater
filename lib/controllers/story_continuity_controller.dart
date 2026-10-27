@@ -96,17 +96,7 @@ extension StoryContinuityController on AppStateController {
         }
         var baseline = upgradingLegacy || npc.characterId == character.id
             ? npc
-            : npc.copyWith(
-                affinity: 0,
-                lifecycle: NpcLifecycle.active,
-                impression: '',
-                impressionHistory: [],
-                bondRoute: const NpcBondRoute(),
-                giftHistory: [],
-                npcMemory: [],
-                worldEvents: [],
-                relationshipEdges: [],
-                runtimeState: const NpcRuntimeState());
+            : npc.freshWorld();
         if (upgradingLegacy) {
           baselines[npc.id] = baseline.toJson();
         }
@@ -148,19 +138,7 @@ extension StoryContinuityController on AppStateController {
       if (state.data['npcScopeLocked'] == true && npc.characterId != worldId) {
         continue;
       }
-      final baseline = npc.characterId == worldId
-          ? npc
-          : npc.copyWith(
-              affinity: 0,
-              lifecycle: NpcLifecycle.active,
-              impression: '',
-              impressionHistory: [],
-              bondRoute: const NpcBondRoute(),
-              giftHistory: [],
-              npcMemory: [],
-              worldEvents: [],
-              relationshipEdges: [],
-              runtimeState: const NpcRuntimeState());
+      final baseline = npc.characterId == worldId ? npc : npc.freshWorld();
       worlds[npc.id] =
           NpcWorldState(profile: baseline.toJson(), messages: []).toJson();
       added = true;
@@ -256,6 +234,13 @@ extension StoryContinuityController on AppStateController {
             legacyBaseline: storyMap(worlds[npcId])['legacyBaseline'] == true)
         .toJson();
     next.data['npcWorlds'] = worlds;
+    if (batches.isNotEmpty) {
+      next.data['checkpoints'] = {
+        ...next.checkpoints,
+        for (final id in batches.keys)
+          id: {...storyMap(next.checkpoints[id]), 'npcAfter': worlds}
+      };
+    }
     await _store.commitStoryWorkspace(state: next);
     _continuityCache[id] = next;
   }
@@ -334,9 +319,17 @@ extension StoryContinuityController on AppStateController {
 
   Future<void> _invalidateContinuitySources(
       String worldId, Set<String> ids) async {
-    final next = StoryContinuityEngine.invalidateSources(
-        await _ensureContinuity(worldId), ids);
-    await _store.commitStoryWorkspace(state: next);
+    var original = await _ensureContinuity(worldId);
+    final remaining = {
+      ...(_historyCache[worldId]?.messages ?? <ChatMessage>[]).map((m) => m.id),
+      ..._npcMessagesCache.values.expand((list) => list.map((m) => m.id))
+    };
+    final removed = ids.difference(remaining);
+    if (removed.isNotEmpty) {
+      original = _restoreEvolutionAfterRemoval(original, removed);
+    }
+    final next = StoryContinuityEngine.invalidateSources(original, ids);
+    await _store.commitStoryWorkspace(state: next, npcProfiles: _npcProfiles);
     _continuityCache[worldId] = next;
   }
 
@@ -495,8 +488,37 @@ extension StoryContinuityController on AppStateController {
         characterId: next.characterId,
         history: history.copyWith(clearPromptCacheEpoch: true),
         changedMessageIds: storyStrings(old['sourceIds']).toSet());
+    final profiles = [..._npcProfiles];
+    final accepted = currentContinuity.conflicts
+        .where((c) => c['id'] == conflictId && c['resolved'] != true)
+        .firstOrNull;
+    if (accepted?['npcUpdate'] is Map) {
+      final update = GameNpcUpdate.fromJson(storyMap(accepted!['npcUpdate']));
+      final i = profiles.indexWhere((n) => n.id == accepted['npcId']);
+      if (i >= 0) {
+        var npc = NpcEvolutionEngine.apply(
+            profiles[i], update, 'confirmation/$newId');
+        final lifecycle = NpcLifecycleX.tryFromValue(update.lifecycle);
+        if (lifecycle != null) npc = npc.copyWith(lifecycle: lifecycle);
+        profiles[i] = npc;
+        final previous =
+            NpcWorldState.fromJson(storyMap(next.npcWorlds[npc.id]));
+        next.data['npcWorlds'] = {
+          ...next.npcWorlds,
+          npc.id:
+              NpcWorldState(profile: npc.toJson(), messages: previous.messages)
+                  .toJson()
+        };
+      }
+    }
     await _store.commitStoryWorkspace(
-        state: next, history: invalidated.history, memory: invalidated.memory);
+        state: next,
+        history: invalidated.history,
+        memory: invalidated.memory,
+        npcProfiles: profiles);
+    _npcProfiles
+      ..clear()
+      ..addAll(profiles);
     _continuityCache[next.characterId] = next;
     _historyCache[next.characterId] = invalidated.history;
     _memoryCache[next.characterId] = invalidated.memory;

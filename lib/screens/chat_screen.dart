@@ -1,3 +1,4 @@
+import '../widgets/turn_settlement_dialog.dart';
 import '../models/story_continuity.dart';
 import '../widgets/story_anchored_list.dart';
 import '../widgets/story_workbench.dart';
@@ -145,6 +146,8 @@ class _DirectorInputButton extends StatelessWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final _storyListKey = GlobalKey<StoryAnchoredListState>();
   late final ScrollController _scrollController;
+  bool _settlementShowing = false;
+  final _shownSettlementKeys = <String>{};
   int _lastMessageCount = 0;
   bool _isImmersiveMode = false;
   bool _isExportMode = false;
@@ -211,6 +214,37 @@ class _ChatScreenState extends State<ChatScreen> {
       isSending: controller.isSending,
     );
     _scheduleNpcLetterNotice(controller);
+    if (!_settlementShowing &&
+        ModalRoute.of(context)?.isCurrent == true &&
+        !controller.isSending &&
+        controller.currentTabIndex == 0 &&
+        controller.unreadTurnSettlement != null &&
+        !_shownSettlementKeys.contains(
+            '${character.id}/${controller.unreadTurnSettlement!.turnId}/${controller.unreadTurnSettlement!.revision}')) {
+      _settlementShowing = true;
+      final worldId = character.id;
+      final receipt = controller.unreadTurnSettlement!;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        try {
+          if (!mounted ||
+              controller.currentCharacter?.id != worldId ||
+              controller.currentTabIndex != 0 ||
+              ModalRoute.of(context)?.isCurrent != true) {
+            return;
+          }
+          _shownSettlementKeys
+              .add('$worldId/${receipt.turnId}/${receipt.revision}');
+          try {
+            await controller.markSettlementSeen(receipt.turnId);
+          } catch (error) {
+            debugPrint('结算已完成，已读标记暂未保存：$error');
+          }
+          if (context.mounted) await showTurnSettlement(context, receipt);
+        } finally {
+          if (mounted) setState(() => _settlementShowing = false);
+        }
+      });
+    }
 
     return Padding(
       padding: EdgeInsets.fromLTRB(

@@ -1,3 +1,4 @@
+import '../models/story_opening_draft.dart';
 import 'narrative_content.dart';
 import 'inline_theater_contract.dart';
 import '../models/inline_theater_settings.dart';
@@ -513,7 +514,7 @@ class LlmApiClient {
     var parsed = _parseSimulatorJson(combined);
 
     // 字段缺失、类型错误或截断时只补全一次；最终仍不完整则报错。
-    if (parsed == null) {
+    if (parsed == null && !request.includeOpening) {
       final continuation = StringBuffer();
       try {
         await for (final chunk in streamUtilityTask(
@@ -541,6 +542,13 @@ class LlmApiClient {
 
     if (parsed != null) {
       return SimulatorPromptGenerationResult(
+        openingDraft: request.includeOpening
+            ? StoryOpeningDraft.fromJson(_decodeSimulatorJsonMap(
+                    combined)?['openingDraft'] is Map
+                ? Map<String, dynamic>.from(
+                    _decodeSimulatorJsonMap(combined)!['openingDraft'] as Map)
+                : {})
+            : null,
         name: parsed.name,
         prompt: parsed.systemPrompt,
         openingMessage: parsed.opening,
@@ -1847,7 +1855,7 @@ ${character.gameplaySystem == null ? '' : '6. 玩法系统已启用，[GAME_STAT
     if (character.mapModeEnabled) {
       return '''
 【地图主线本轮回复格式提醒】
-1. 继续当前主线，写清玩家行动造成的可观察结果。正式剧情推进时纯文字正文不少于 2000 个中文字符，目标 2200-3200 个中文字符；通过行动、对话和处境变化展开，不反复解释同一种情绪。
+1. 继续当前主线，写清玩家行动造成的可观察结果。正式剧情推进时${character.advancedSettings.lengthInstruction}；通过行动、对话和处境变化展开，不反复解释同一种情绪。
 2. ${character.requiresHtmlPanel ? '输出一个非正史互动番外 HTML；禁止地图、任务或状态面板。' : '关闭番外，不输出 HTML。'}
 3. 必须输出独立且完整闭合的 [GAME_STATE] 状态块与 [MAP_STATE] JSON 块；不能放进 HTML、Markdown 围栏或气泡。沿用稳定的地点与行动 ID，地图结果以本轮实际发生的事实为准。
 ${character.gameplaySystem == null ? '' : '4. [GAME_STATE] 后必须输出独立 [THEATER_PATCH] JSON 块，再输出 [MAP_STATE]；只记录有事实依据的变量变化，无变化时 ops 为空。'}
@@ -1868,7 +1876,7 @@ ${character.gameplaySystem == null ? '' : '4. [GAME_STATE] 后必须输出独立
     return '''
 【本轮回复格式强制提醒】
 本轮仍按 App 格式完成，禁止只输出纯文本：
-1. 剧情正文：继续当前主线，不解释规则；正式剧情推进时纯文字正文不少于 2000 个中文字符，目标 2200-3200 个中文字符。
+1. 剧情正文：继续当前主线，不解释规则；正式剧情推进时${character.advancedSettings.lengthInstruction}。
    - 从眼前的动作与处境接续。重要选择和关系变化展开写，重复过程适当概述；每段增加行动、信息或后果，不用同义句凑长度，不在结尾替人物总结道理。
 2. ${character.requiresHtmlPanel ? 'HTML：唯一完整的非正史互动番外，按本轮主题和本地交互协议创作。' : '当前关闭番外，不输出 HTML。'}
 3. [GAME_STATE]：独立状态块，放在选项之前，不得写进 HTML、代码块、[BUBBLE] 或选项文字。
@@ -1946,7 +1954,7 @@ ${character.nextStepOptionsEnabled ? '[CHOICES] 必须且只能包含 A、B、C 
     if (character.mapModeEnabled) {
       buffer
         ..writeln(
-            '当前角色启用了地图主线模式。必须输出：可阅读长剧情、独立 [GAME_STATE] 状态块、独立 [MAP_STATE] JSON 块。纯文字剧情正文不少于 2000 个中文字符。')
+            '当前角色启用了地图主线模式。必须输出：可阅读长剧情、独立 [GAME_STATE] 状态块、独立 [MAP_STATE] JSON 块。${character.advancedSettings.lengthInstruction}')
         ..writeln('不要输出 [CHOICES]；下一步行动写入 [MAP_STATE].activeChoices，供行动篮子使用。')
         ..writeln(
             '[GAME_STATE] 和 [MAP_STATE] 不得写进 HTML、Markdown 代码块、[BUBBLE] 或选项文本里。')
@@ -1959,7 +1967,7 @@ ${character.nextStepOptionsEnabled ? '[CHOICES] 必须且只能包含 A、B、C 
     buffer
       ..writeln(
           '按隐藏协议完整输出：可阅读正文 → ${character.requiresHtmlPanel ? '互动番外 HTML → ' : ''}独立 [GAME_STATE] 状态块。')
-      ..writeln('正文先按轻小说写足，不少于 2000 个中文字符；HTML、状态块和选项不计入正文长度。')
+      ..writeln(character.advancedSettings.lengthInstruction)
       ..writeln('[GAME_STATE] 不得写进 HTML、Markdown 代码块、[BUBBLE] 或选项文本里。');
 
     if (character.nextStepOptionsEnabled) {

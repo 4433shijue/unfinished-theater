@@ -44,15 +44,20 @@ class TurnStateAdjudicator {
         "affinityDelta": 0,
         "lifecycle": "active/away/missing/dead/archived；无转换时留空",
         "lifecycleReason": "生命周期转换的正文事实；无转换时留空",
+        "storyPatch": {"evidence":"逐字引用正文中确认变化的句子；无变化时整个 storyPatch 留空对象","publicIdentity":"揭露后玩家已知的身份","name":"仅明确更名时填写","appeared":true,"revealSecret":false,"trustDelta":0,"summary":"公开变化摘要","relations":[]},
         "proactiveMessage": "NPC 本轮真正发出的私聊原话；没有就留空"
       }
     ]
   },
+  "routineActions": [],
   "gameplayPatch": {"ops": []}
 }
 
 ${StoryContinuityEngine.patchContract}
 
+日常行动规则：routineActions 是独立后台日常行动建议，不冒充正文已发生事实。只有游戏时间明确推进时最多两人各一步，格式 {"npcId":"稳定ID","type":"move/work/investigate/relationship 中的一项","summary":"具体日常行动","reason":"已有目标与经过时间的依据","location":"移动到的位置","timeEvidence":"正文中时间明确流逝的原句"}。不能改变生死、揭露身份或背叛，不直接改变对玩家好感，公开结算不显示这些后台行动。重大变化可用 type=lead 提供待展开的线索，只会保存在后台，必须由后续正文明确交代后才能生效。
+剧情物品栏使用对象数组，保留物品稳定 id、name、quantity（剩余数量）、description、source。消耗后扣减 quantity，数量为零才移除，不把使用一次当成整件消失。
+人物 storyPatch 只能更新玩家已经获知的事实，不能改写后台 trueIdentity/secret。evidence 必须逐字来自正文；计划、传闻和推测不算事实。关系使用 targetId，未知的人物关系 public=false。玩法 threads 使用 deadline 原样引用明确约定的期限。程序只将明确的数字回合期限换算为 dueTurn；没有约定或无法解析时不推断。
 裁判规则：
 1. gameState 至少保留时间、地点、状态、当前任务等核心状态；没变的可沿用上轮。
 2. NPC 好感的唯一事实源是 NPC 档案。已建档 NPC 只写 npcId 和 affinityDelta，单轮范围 -12..12；不要输出绝对好感度。
@@ -94,6 +99,7 @@ ${gameplayPatchRequired ? GameplayPromptContext.threadInstructions : ''}
             'name': npc.name,
             'affinity': npc.affinity,
             'lifecycle': npc.lifecycle.name,
+            'storyState': npc.storyState.toJson(),
             'impression': npc.impression,
             'location': npc.runtimeState.location,
             'currentGoal': npc.runtimeState.currentGoal,

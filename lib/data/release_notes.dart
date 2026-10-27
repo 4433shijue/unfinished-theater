@@ -29,6 +29,35 @@ class ReleaseNotes {
 }
 
 const ReleaseNotes currentReleaseNotes = ReleaseNotes(
+  id: 'v2.15.0',
+  version: 'V2.15.0',
+  title: 'V2.15.0 人物与世界一起成长',
+  subtitle: '预览你的开局，看清每一回合带来的变化。',
+  items: [
+    ReleaseNoteItem(
+        icon: Icons.tune,
+        title: '高级设置，按你的偏好讲故事',
+        description: '叙事视角、篇幅、节奏与自由指令长期保留；完整文游和盲盒带有 3—6 位初始人物。'),
+    ReleaseNoteItem(
+        icon: Icons.people_outline,
+        title: '开局可以预览与局部重做',
+        description: '编辑人物、初始好感、关系、物品和玩法，锁定满意的部分；作者秘密入口不改变玩家知情。'),
+    ReleaseNoteItem(
+        icon: Icons.auto_stories_outlined,
+        title: '人物有经历，也有自己的目标',
+        description: '身份揭露保留同一人物，重大变化以正文为据；日常目标随游戏内时间推进。'),
+    ReleaseNoteItem(
+        icon: Icons.receipt_long_outlined,
+        title: '每回合结算，一眼看清变化',
+        description: '统一查看变量、道具、好感、人物事件和承诺变化；关闭后可从消息再次查看。'),
+    ReleaseNoteItem(
+        icon: Icons.history,
+        title: '读档与回退带回当时的世界',
+        description: '人物、物品和结算跟随存档；旧文游保留进度，初始人物与玩法可主动补充。'),
+  ],
+);
+
+const ReleaseNotes _v2140ReleaseNotes = ReleaseNotes(
   id: 'v2.14.0',
   version: 'V2.14.0',
   title: 'V2.14.0 好好接住每一场戏',
@@ -1814,6 +1843,7 @@ const ReleaseNotes _v210ReleaseNotes = ReleaseNotes(
 
 const List<ReleaseNotes> releaseNotesHistory = <ReleaseNotes>[
   currentReleaseNotes,
+  _v2140ReleaseNotes,
   _v2131ReleaseNotes,
   _v2130ReleaseNotes,
   _v2120ReleaseNotes,

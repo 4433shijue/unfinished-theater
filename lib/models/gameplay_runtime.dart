@@ -8,6 +8,8 @@ class GameplayThreadOperation {
     required this.id,
     this.title = '',
     this.description = '',
+    this.dueTurn,
+    this.deadline = '',
     this.reason = '',
     this.visibility = GameplayVariableVisibility.public,
   });
@@ -18,6 +20,10 @@ class GameplayThreadOperation {
         id: _text(json['id'], 81),
         title: _text(json['title'], 80),
         description: _text(json['description'], 600),
+        deadline: _text(json['deadline'], 120),
+        dueTurn: json['dueTurn'] is int && (json['dueTurn'] as int) >= 0
+            ? json['dueTurn'] as int
+            : null,
         reason: _text(json['reason'], 300),
         visibility: _visibility(json['visibility']),
       );
@@ -26,6 +32,8 @@ class GameplayThreadOperation {
   final String id;
   final String title;
   final String description;
+  final int? dueTurn;
+  final String deadline;
   final String reason;
   final GameplayVariableVisibility visibility;
 
@@ -34,6 +42,8 @@ class GameplayThreadOperation {
         'id': id,
         if (title.isNotEmpty) 'title': title,
         if (description.isNotEmpty) 'description': description,
+        if (dueTurn != null) 'dueTurn': dueTurn,
+        if (deadline.isNotEmpty) 'deadline': deadline,
         'reason': reason,
         'visibility': visibility.name,
       };
@@ -44,6 +54,8 @@ class GameplayStoryThread {
     required this.id,
     required this.title,
     this.description = '',
+    this.dueTurn,
+    this.deadline = '',
     this.reason = '',
     this.visibility = GameplayVariableVisibility.public,
     this.status = GameplayThreadStatus.open,
@@ -56,6 +68,10 @@ class GameplayStoryThread {
         id: _text(json['id'], 80),
         title: _text(json['title'], 80),
         description: _text(json['description'], 600),
+        deadline: _text(json['deadline'], 120),
+        dueTurn: json['dueTurn'] is int && (json['dueTurn'] as int) >= 0
+            ? json['dueTurn'] as int
+            : null,
         reason: _text(json['reason'], 300),
         visibility: _runtimeVisibility(json['visibility']),
         status: switch (json['status']) {
@@ -70,6 +86,8 @@ class GameplayStoryThread {
   final String id;
   final String title;
   final String description;
+  final int? dueTurn;
+  final String deadline;
   final String reason;
   final GameplayVariableVisibility visibility;
   final GameplayThreadStatus status;
@@ -85,6 +103,8 @@ class GameplayStoryThread {
         id: id,
         title: title,
         description: description,
+        dueTurn: dueTurn,
+        deadline: deadline,
         reason: nextReason,
         visibility: visibility ?? this.visibility,
         status: nextStatus,
@@ -96,6 +116,8 @@ class GameplayStoryThread {
         'id': id,
         'title': title,
         'description': description,
+        if (dueTurn != null) 'dueTurn': dueTurn,
+        if (deadline.isNotEmpty) 'deadline': deadline,
         'reason': reason,
         'visibility': visibility.name,
         'status': status.name,

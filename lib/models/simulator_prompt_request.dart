@@ -1,3 +1,6 @@
+import 'story_advanced_settings.dart';
+import 'story_opening_draft.dart';
+
 enum SimulatorPromptGenerationMode {
   fullSimulator,
   worldStage,
@@ -8,6 +11,10 @@ class SimulatorPromptGenerationRequest {
     required this.roleName,
     required this.simulatorIdea,
     this.shortDescription = '',
+    this.advancedSettings = const StoryAdvancedSettings(),
+    this.includeOpening = false,
+    this.existingOpening,
+    this.regenerateSection = '',
     this.styleHint = '',
     this.extraConstraints = '',
     this.uploadedDocumentText = '',
@@ -17,6 +24,10 @@ class SimulatorPromptGenerationRequest {
   final String roleName;
   final String simulatorIdea;
   final String shortDescription;
+  final StoryAdvancedSettings advancedSettings;
+  final bool includeOpening;
+  final StoryOpeningDraft? existingOpening;
+  final String regenerateSection;
   final String styleHint;
   final String extraConstraints;
   final String uploadedDocumentText;
@@ -28,9 +39,11 @@ class SimulatorPromptGenerationResult {
     required this.prompt,
     required this.description,
     required this.openingMessage,
+    this.openingDraft,
     this.name = '',
   });
 
+  final StoryOpeningDraft? openingDraft;
   final String prompt;
   final String description;
   final String openingMessage;

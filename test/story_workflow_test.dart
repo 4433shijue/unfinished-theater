@@ -292,7 +292,7 @@ void main() {
     await c.saveReadingPosition('main', c.currentHistory.messages.last.id, 0.4,
         leaving: true);
     final exported = await c.exportAllDataArchive();
-    expect(jsonDecode(exported)['schemaVersion'], 3);
+    expect(jsonDecode(exported)['schemaVersion'], 4);
     await c.setFactPinned(c.currentContinuity.facts.last['id'], false);
     expect(await c.importDataArchive(exported, replaceExisting: true), isNull);
     expect(c.currentContinuity.facts.last['pinned'], true);

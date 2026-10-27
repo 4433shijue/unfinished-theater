@@ -6,6 +6,7 @@ class StoryInventoryItem {
   const StoryInventoryItem({
     required this.id,
     required this.name,
+    this.quantity = 1,
     this.description = '',
     this.effect = '',
     this.source = '',
@@ -16,6 +17,9 @@ class StoryInventoryItem {
 
   factory StoryInventoryItem.fromJson(Map<String, dynamic> json) {
     return StoryInventoryItem(
+      quantity:
+          (json['quantity'] is num ? (json['quantity'] as num).toInt() : 1)
+              .clamp(0, 999999),
       id: json['id']?.toString().trim() ?? '',
       name: json['name']?.toString().trim() ?? '',
       description: json['description']?.toString().trim() ?? '',
@@ -49,6 +53,7 @@ class StoryInventoryItem {
     );
   }
 
+  final int quantity;
   final String id;
   final String name;
   final String description;
@@ -63,6 +68,7 @@ class StoryInventoryItem {
     return StoryInventoryItem(
       id: id.trim().isEmpty ? _stableStoryItemId(safeName) : id.trim(),
       name: safeName,
+      quantity: quantity,
       description: description.trim(),
       effect: effect.trim(),
       source: source.trim(),
@@ -73,6 +79,7 @@ class StoryInventoryItem {
   }
 
   StoryInventoryItem copyWith({
+    int? quantity,
     String? id,
     String? name,
     String? description,
@@ -83,6 +90,7 @@ class StoryInventoryItem {
     DateTime? createdAt,
   }) {
     return StoryInventoryItem(
+      quantity: quantity ?? this.quantity,
       id: id ?? this.id,
       name: name ?? this.name,
       description: description ?? this.description,
@@ -96,6 +104,7 @@ class StoryInventoryItem {
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
+      'quantity': quantity,
       'id': id,
       'name': name,
       'description': description,
@@ -512,6 +521,7 @@ class GameStateSnapshot {
 class GameNpcUpdate {
   const GameNpcUpdate({
     required this.name,
+    this.storyPatch = const {},
     this.npcId = '',
     this.description = '',
     this.impression = '',
@@ -538,6 +548,9 @@ class GameNpcUpdate {
             .trim() ??
         '';
     return GameNpcUpdate(
+      storyPatch: json['storyPatch'] is Map
+          ? Map<String, dynamic>.from(json['storyPatch'] as Map)
+          : const {},
       npcId:
           (json['npcId'] ?? json['id'] ?? json['NPC ID'])?.toString().trim() ??
               '',
@@ -587,6 +600,7 @@ class GameNpcUpdate {
   }
 
   final String name;
+  final Map<String, dynamic> storyPatch;
   final String npcId;
   final String description;
   final String impression;
@@ -609,6 +623,7 @@ class GameNpcUpdate {
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
       'name': name,
+      'storyPatch': storyPatch,
       'npcId': npcId,
       'description': description,
       'impression': impression,

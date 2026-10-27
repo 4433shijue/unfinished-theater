@@ -393,6 +393,7 @@ extension StoryRewriteController on AppStateController {
         : _gameStateBeforeMessageIndex(
                 source.id, history.messages, targetIndex < 0 ? 0 : targetIndex)
             .copyWith(characterId: branchId);
+    final settlementBefore = before;
     final branch = source.copyWith(
         id: branchId,
         gameplaySystem: checkpoint['gameplaySystem'] is Map
@@ -545,7 +546,7 @@ extension StoryRewriteController on AppStateController {
     }
     next.data['npcMigrationVersion'] = 1;
     next.data['npcScopeLocked'] = true;
-    final branchHistory = DialogueHistory(
+    var branchHistory = DialogueHistory(
         characterId: branchId,
         messages: messages
             .map((m) => m.copyWith(
@@ -582,11 +583,51 @@ extension StoryRewriteController on AppStateController {
             for (final e in next.npcWorlds.entries)
               e.key: NpcWorldState.fromJson(storyMap(e.value)).messages
           });
+        final priorNpcs = _npcProfilesForRuntime(branchId);
+        before = NpcEvolutionEngine.validate(
+            before,
+            MessageContentParser.contextTextForModel(preview.nextContent),
+            priorNpcs,
+            next);
         await _applyGameStateNpcUpdates(branchId, before,
             persist: false,
             updateGamification: false,
-            emitProactiveMessages: false);
+            emitProactiveMessages: false,
+            sourceTurnId: finalId);
+        for (final update in before.npcUpdates) {
+          final i = _npcProfiles.indexWhere((n) =>
+              n.id == update.npcId ||
+              (n.isBoundTo(branchId) && n.name == update.name));
+          if (i >= 0) {
+            _npcProfiles[i] =
+                NpcEvolutionEngine.apply(_npcProfiles[i], update, finalId);
+          }
+        }
+        final receipt = TurnSettlement.compare(
+            worldId: branchId,
+            turnId: finalId,
+            before: settlementBefore,
+            after: before,
+            beforeNpcs: priorNpcs,
+            afterNpcs: _npcProfilesForRuntime(branchId));
+        branchHistory = branchHistory.copyWith(
+            messages: branchHistory.messages
+                .map((m) => m.id == finalId
+                    ? m.copyWith(gameStateSnapshot: {
+                        ...?m.gameStateSnapshot,
+                        ...before.toJson(),
+                        'turnSettlement': receipt.toJson()
+                      })
+                    : m)
+                .toList());
         next = _captureNpcWorld(next);
+        next.data['checkpoints'] = {
+          ...next.checkpoints,
+          finalId: {
+            ...storyMap(next.checkpoints[finalId]),
+            'npcAfter': next.npcWorlds
+          }
+        };
         profiles = List<NpcProfile>.from(_npcProfiles);
       } finally {
         _characters.removeWhere((c) => c.id == branchId);

@@ -1,6 +1,8 @@
 import 'inline_theater_settings.dart';
 import '../services/inline_theater_contract.dart';
 import 'model_params.dart';
+import 'story_advanced_settings.dart';
+import 'story_opening_draft.dart';
 import 'gameplay_system.dart';
 
 class CharacterProfile {
@@ -10,6 +12,8 @@ class CharacterProfile {
     required this.createdAt,
     required this.prompt,
     required this.modelParams,
+    this.advancedSettings = const StoryAdvancedSettings(),
+    this.openingDraft,
     this.description = '',
     this.openingMessage = '',
     this.hiddenPrompt = '',
@@ -41,6 +45,14 @@ class CharacterProfile {
       createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
           DateTime.now(),
       prompt: json['prompt']?.toString() ?? '',
+      advancedSettings: StoryAdvancedSettings.fromJson(
+          json['advancedSettings'] is Map
+              ? Map<String, dynamic>.from(json['advancedSettings'] as Map)
+              : {}),
+      openingDraft: json['openingDraft'] is Map
+          ? StoryOpeningDraft.fromJson(
+              Map<String, dynamic>.from(json['openingDraft'] as Map))
+          : null,
       description: json['description']?.toString() ?? '',
       openingMessage: json['openingMessage']?.toString() ?? '',
       hiddenPrompt: json['hiddenPrompt']?.toString() ?? '',
@@ -78,6 +90,8 @@ class CharacterProfile {
   final String name;
   final DateTime createdAt;
   final String prompt;
+  final StoryAdvancedSettings advancedSettings;
+  final StoryOpeningDraft? openingDraft;
   final String description;
   final String openingMessage;
   final String hiddenPrompt;
@@ -147,6 +161,7 @@ class CharacterProfile {
     final parts = <String>[
       runtimeProtocolPrompt.trim(),
       prompt.trim(),
+      advancedSettings.toPrompt(groupChat: largeGroupChatModeEnabled),
     ].where((part) => part.isNotEmpty);
     return parts.join('\n\n');
   }
@@ -170,8 +185,7 @@ class CharacterProfile {
     buffer
       ..writeln()
       ..writeln('【主聊天叙事长度｜轻小说正文】')
-      ..writeln(
-          '当本轮属于主聊天里的角色扮演、文游、模拟器、沉浸模式或剧情推进时，纯文字剧情正文目标为 2200-3200 个中文字符，硬性下限为 2000 个中文字符。')
+      ..writeln(advancedSettings.lengthInstruction)
       ..writeln(
           '长度只统计用户直接阅读的剧情正文，不统计 HTML、[BUBBLE] 标签、[GAME_STATE]、[THEATER_PATCH]、[MAP_STATE]、[CHOICES]、JSON 字段名或系统说明。')
       ..writeln(
@@ -362,6 +376,8 @@ class CharacterProfile {
     String? name,
     DateTime? createdAt,
     String? prompt,
+    StoryAdvancedSettings? advancedSettings,
+    StoryOpeningDraft? openingDraft,
     String? description,
     String? openingMessage,
     String? hiddenPrompt,
@@ -389,6 +405,8 @@ class CharacterProfile {
       name: name ?? this.name,
       createdAt: createdAt ?? this.createdAt,
       prompt: prompt ?? this.prompt,
+      advancedSettings: advancedSettings ?? this.advancedSettings,
+      openingDraft: openingDraft ?? this.openingDraft,
       description: description ?? this.description,
       openingMessage: openingMessage ?? this.openingMessage,
       hiddenPrompt: hiddenPrompt ?? this.hiddenPrompt,
@@ -427,6 +445,8 @@ class CharacterProfile {
       'name': name,
       'createdAt': createdAt.toIso8601String(),
       'prompt': prompt,
+      'advancedSettings': advancedSettings.toJson(),
+      if (openingDraft != null) 'openingDraft': openingDraft!.toJson(),
       'description': description,
       'openingMessage': openingMessage,
       'hiddenPrompt': hiddenPrompt,
@@ -456,6 +476,8 @@ class CharacterDraft {
   const CharacterDraft({
     required this.name,
     required this.prompt,
+    this.advancedSettings = const StoryAdvancedSettings(),
+    this.openingDraft,
     this.description = '',
     this.openingMessage = '',
     this.hiddenPrompt = '',
@@ -471,6 +493,8 @@ class CharacterDraft {
 
   final String name;
   final String prompt;
+  final StoryAdvancedSettings advancedSettings;
+  final StoryOpeningDraft? openingDraft;
   final String description;
   final String openingMessage;
   final String hiddenPrompt;

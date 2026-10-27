@@ -1,4 +1,5 @@
 import 'npc_runtime.dart';
+import 'npc_story_state.dart';
 
 enum NpcMessageRole {
   user,
@@ -214,6 +215,8 @@ class NpcProfile {
     required this.createdAt,
     required this.updatedAt,
     this.description = '',
+    this.baseName = '',
+    this.baseDescription = '',
     this.avatarDataUri = '',
     this.impression = '',
     this.affinity = 0,
@@ -227,6 +230,7 @@ class NpcProfile {
     this.globalBinding = false,
     this.boundCharacterIds = const <String>[],
     this.giftHistory = const <NpcGiftRecord>[],
+    this.storyState = const NpcStoryState(),
     this.runtimeState = const NpcRuntimeState(),
     this.npcMemory = const <NpcMemoryEntry>[],
     this.relationshipEdges = const <RelationshipEdge>[],
@@ -245,7 +249,13 @@ class NpcProfile {
     return NpcProfile(
       id: json['id']?.toString() ?? '',
       characterId: json['characterId']?.toString() ?? '',
+      storyState: NpcStoryState.fromJson(json['storyState'] is Map
+          ? Map<String, dynamic>.from(json['storyState'] as Map)
+          : {}),
       name: json['name']?.toString() ?? '未命名 NPC',
+      baseName: (json['baseName'] ?? json['name'])?.toString() ?? '未命名 NPC',
+      baseDescription:
+          (json['baseDescription'] ?? json['description'])?.toString() ?? '',
       createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
           DateTime.now(),
       updatedAt: DateTime.tryParse(json['updatedAt']?.toString() ?? '') ??
@@ -346,6 +356,8 @@ class NpcProfile {
   final String id;
   final String characterId;
   final String name;
+  final String baseName;
+  final String baseDescription;
   final DateTime createdAt;
   final DateTime updatedAt;
   final String description;
@@ -362,10 +374,26 @@ class NpcProfile {
   final bool globalBinding;
   final List<String> boundCharacterIds;
   final List<NpcGiftRecord> giftHistory;
+  final NpcStoryState storyState;
   final NpcRuntimeState runtimeState;
   final List<NpcMemoryEntry> npcMemory;
   final List<RelationshipEdge> relationshipEdges;
   final List<WorldEvent> worldEvents;
+
+  NpcProfile freshWorld() => copyWith(
+      name: baseName.isEmpty ? name : baseName,
+      description: baseName.isEmpty ? description : baseDescription,
+      storyState: const NpcStoryState(),
+      affinity: 0,
+      lifecycle: NpcLifecycle.active,
+      impression: '',
+      impressionHistory: [],
+      bondRoute: const NpcBondRoute(),
+      giftHistory: [],
+      npcMemory: [],
+      worldEvents: [],
+      relationshipEdges: [],
+      runtimeState: const NpcRuntimeState());
 
   bool get hasReusableRoleCard =>
       roleCardFinalized || roleCard.trim().isNotEmpty;
@@ -394,6 +422,8 @@ class NpcProfile {
     String? id,
     String? characterId,
     String? name,
+    String? baseName,
+    String? baseDescription,
     DateTime? createdAt,
     DateTime? updatedAt,
     String? description,
@@ -410,6 +440,7 @@ class NpcProfile {
     bool? globalBinding,
     List<String>? boundCharacterIds,
     List<NpcGiftRecord>? giftHistory,
+    NpcStoryState? storyState,
     NpcRuntimeState? runtimeState,
     List<NpcMemoryEntry>? npcMemory,
     List<RelationshipEdge>? relationshipEdges,
@@ -420,6 +451,9 @@ class NpcProfile {
       id: id ?? this.id,
       characterId: characterId ?? this.characterId,
       name: name ?? this.name,
+      baseName: baseName ?? (this.baseName.isEmpty ? this.name : this.baseName),
+      baseDescription: baseDescription ??
+          (this.baseName.isEmpty ? this.description : this.baseDescription),
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       description: description ?? this.description,
@@ -438,6 +472,7 @@ class NpcProfile {
           ? const <String>[]
           : boundCharacterIds ?? this.boundCharacterIds,
       giftHistory: giftHistory ?? this.giftHistory,
+      storyState: storyState ?? this.storyState,
       runtimeState: runtimeState ?? this.runtimeState,
       npcMemory: npcMemory ?? this.npcMemory,
       relationshipEdges: relationshipEdges ?? this.relationshipEdges,
@@ -450,6 +485,8 @@ class NpcProfile {
       'id': id,
       'characterId': characterId,
       'name': name,
+      'baseName': baseName.isEmpty ? name : baseName,
+      'baseDescription': baseName.isEmpty ? description : baseDescription,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
       'description': description,
@@ -467,6 +504,7 @@ class NpcProfile {
       'globalBinding': globalBinding,
       'boundCharacterIds': boundCharacterIds,
       'giftHistory': giftHistory.map((item) => item.toJson()).toList(),
+      'storyState': storyState.toJson(),
       'runtimeState': runtimeState.toJson(),
       'npcMemory': npcMemory.map((item) => item.toJson()).toList(),
       'relationshipEdges':

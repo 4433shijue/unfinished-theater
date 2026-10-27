@@ -1,3 +1,5 @@
+import '../models/turn_settlement.dart';
+import 'turn_settlement_dialog.dart';
 import 'package:flutter/material.dart';
 
 import '../models/chat_message.dart';
@@ -17,6 +19,19 @@ class GameplayTurnFeedback extends StatelessWidget {
   Widget build(BuildContext context) {
     if (isStreaming || message.role != ChatRole.assistant) {
       return const SizedBox.shrink();
+    }
+    final settlement = TurnSettlement.of(message);
+    if (settlement != null) {
+      return Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: OutlinedButton.icon(
+              onPressed: () => showTurnSettlement(context, settlement),
+              icon: Icon(settlement.complete
+                  ? Icons.receipt_long
+                  : Icons.error_outline),
+              label: Text(settlement.complete
+                  ? '查看本回合结算 · ${settlement.entries.length} 项变化'
+                  : '结算未完成 · 重试或回退')));
     }
     final raw = message.gameStateSnapshot?['gameplayPlayerVariableChanges'];
     final changes = raw is List
