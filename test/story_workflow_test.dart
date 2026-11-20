@@ -292,7 +292,7 @@ void main() {
     await c.saveReadingPosition('main', c.currentHistory.messages.last.id, 0.4,
         leaving: true);
     final exported = await c.exportAllDataArchive();
-    expect(jsonDecode(exported)['schemaVersion'], 4);
+    expect(jsonDecode(exported)['schemaVersion'], 5);
     await c.setFactPinned(c.currentContinuity.facts.last['id'], false);
     expect(await c.importDataArchive(exported, replaceExisting: true), isNull);
     expect(c.currentContinuity.facts.last['pinned'], true);
@@ -501,6 +501,7 @@ class FailingStore extends LocalStore {
   @override
   Future<void> commitStoryWorkspace(
       {required StoryContinuityState state,
+      Map<String, dynamic>? reading,
       DialogueHistory? history,
       CharacterMemory? memory,
       GameStateSnapshot? gameState,
@@ -511,6 +512,7 @@ class FailingStore extends LocalStore {
     if (fail) throw StateError('simulated disk failure');
     return super.commitStoryWorkspace(
         state: state,
+        reading: reading,
         history: history,
         memory: memory,
         gameState: gameState,

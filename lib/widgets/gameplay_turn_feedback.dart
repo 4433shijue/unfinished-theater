@@ -22,16 +22,46 @@ class GameplayTurnFeedback extends StatelessWidget {
     }
     final settlement = TurnSettlement.of(message);
     if (settlement != null) {
+      final entries =
+          settlement.entries.where((e) => e['visibility'] == 'public').toList();
+      bool important(Map<String, dynamic> e) =>
+          e['category'] == '人物状态' ||
+          (e['category'] == '任务' && e['after'] == '已完成') ||
+          (e['category'] == '承诺与伏笔' && ['已兑现', '已失约'].contains(e['after']));
+      entries.sort(
+          (a, b) => (important(b) ? 1 : 0).compareTo(important(a) ? 1 : 0));
+      final emphasis = !settlement.complete || entries.any(important);
+      String label(Map<String, dynamic> e) {
+        final delta = e['delta'];
+        if (delta is num) return '${e['label']} ${delta > 0 ? '+' : ''}$delta';
+        return '${e['label']}${e['after'] == null ? '' : ' · ${e['after']}'}';
+      }
+
       return Padding(
           padding: const EdgeInsets.only(top: 12),
-          child: OutlinedButton.icon(
-              onPressed: () => showTurnSettlement(context, settlement),
-              icon: Icon(settlement.complete
-                  ? Icons.receipt_long
-                  : Icons.error_outline),
-              label: Text(settlement.complete
-                  ? '查看本回合结算 · ${settlement.entries.length} 项变化'
-                  : '结算未完成 · 重试或回退')));
+          child: Container(
+              decoration: BoxDecoration(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .primary
+                      .withValues(alpha: emphasis ? .12 : .04),
+                  borderRadius: BorderRadius.circular(12)),
+              child: ListTile(
+                  dense: true,
+                  leading: Icon(!settlement.complete
+                      ? Icons.error_outline
+                      : emphasis
+                          ? Icons.auto_awesome
+                          : Icons.receipt_long),
+                  title: Text(settlement.complete
+                      ? entries.isEmpty
+                          ? '本回合没有公开状态变化'
+                          : entries.take(2).map(label).join(' · ')
+                      : '结算未完成 · 重试或回退'),
+                  subtitle: Text(settlement.complete
+                      ? '查看全部 · ${entries.length} 项变化'
+                      : settlement.error),
+                  onTap: () => showTurnSettlement(context, settlement))));
     }
     final raw = message.gameStateSnapshot?['gameplayPlayerVariableChanges'];
     final changes = raw is List

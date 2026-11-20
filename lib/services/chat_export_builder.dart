@@ -229,13 +229,13 @@ class ChatExportBuilder {
   }
 
   static String _buildMessageBody(ChatMessage message) {
-    final content = message.content.trim();
+    final content = message.displayContent.trim();
     if (content.isEmpty) {
       return '<p><em>空内容</em></p>';
     }
 
     if (message.role == ChatRole.user) {
-      return '<pre>${const HtmlEscape().convert(content)}</pre>';
+      return '${message.quote == null ? '' : '<blockquote>${const HtmlEscape().convert(message.quote!.text)}</blockquote>'}<pre>${const HtmlEscape().convert(content)}</pre>';
     }
 
     final blocks = MessageContentParser.parse(content);
@@ -271,7 +271,11 @@ class ChatExportBuilder {
       }
     }).join();
 
-    return htmlBlocks;
+    final choices = MessageContentParser.parseStructured(content).choices;
+    final options = choices.isEmpty
+        ? ''
+        : '<ol type="A">${choices.map((c) => '<li>${const HtmlEscape().convert(c.label)}</li>').join()}</ol>';
+    return '$htmlBlocks$options';
   }
 
   static String _formatTimestamp(DateTime value) {

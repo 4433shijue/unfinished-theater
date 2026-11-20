@@ -80,6 +80,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   double _uiScale = 1;
   String _themeId = AppThemeVariant.sakura.id;
   bool _mobilePowerSaveMode = true;
+  bool _fullTurnSettlement = false;
   bool _includeStreamUsage = true;
   bool _allowInsecureMainApi = false;
   bool _allowInsecureMemoryApi = false;
@@ -560,6 +561,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           onChanged: (value) => setState(() => _uiScale = value),
         ),
         const SizedBox(height: 14),
+        SwitchListTile.adaptive(
+            title: const Text('每轮弹出完整结算'),
+            subtitle: const Text('关闭时在正文下显示简短变化，随时可查看明细'),
+            value: _fullTurnSettlement,
+            onChanged: (v) => setState(() => _fullTurnSettlement = v)),
         _PowerSaveSwitchTile(
           value: _mobilePowerSaveMode,
           onChanged: (value) => setState(() => _mobilePowerSaveMode = value),
@@ -963,6 +969,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       uiScale: _uiScale,
       themeId: _themeId,
       mobilePowerSaveMode: _mobilePowerSaveMode,
+      fullTurnSettlement: _fullTurnSettlement,
     );
 
     await controller.saveSettings(next);
@@ -1337,6 +1344,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       uiScale: _uiScale,
       themeId: _themeId,
       mobilePowerSaveMode: _mobilePowerSaveMode,
+      fullTurnSettlement: _fullTurnSettlement,
       includeStreamUsage: _includeStreamUsage,
       promptTokenBudget: _promptTokenBudget,
       memoryApiUrl: _memoryApiUrlController.text.trim(),
@@ -1407,6 +1415,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ? settings.themeId
         : AppThemeVariant.byId(settings.themeId).id;
     _mobilePowerSaveMode = settings.mobilePowerSaveMode;
+    _fullTurnSettlement = settings.fullTurnSettlement;
     _includeStreamUsage = settings.includeStreamUsage;
     _allowInsecureMainApi = settings.allowInsecureMainApi;
     _allowInsecureMemoryApi = settings.allowInsecureMemoryApi;

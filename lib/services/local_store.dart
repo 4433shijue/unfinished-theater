@@ -52,13 +52,19 @@ class LocalStore {
     }
   }
 
+  final Map<String, Future<void>> _readingWrites = {};
   Future<void> saveStoryReading(
-      String worldId, String surface, Map<String, dynamic> record) async {
-    final prefs = await SharedPreferences.getInstance();
-    final reading = await loadStoryReading(worldId);
-    reading[surface] = record;
-    await _setStringChecked(
-        prefs, 'story_reading_$worldId', jsonEncode(reading));
+      String worldId, String surface, Map<String, dynamic> record) {
+    final previous = _readingWrites[worldId] ?? Future<void>.value();
+    final next = previous.catchError((Object _) {}).then((_) async {
+      final prefs = await SharedPreferences.getInstance();
+      final reading = await loadStoryReading(worldId);
+      reading[surface] = record;
+      await _setStringChecked(
+          prefs, 'story_reading_$worldId', jsonEncode(reading));
+    });
+    _readingWrites[worldId] = next;
+    return next;
   }
 
   Future<StoryContinuityState> loadStoryContinuity(String characterId) async {
@@ -78,6 +84,7 @@ class LocalStore {
 
   Future<void> commitStoryWorkspace(
       {required StoryContinuityState state,
+      Map<String, dynamic>? reading,
       DialogueHistory? history,
       CharacterMemory? memory,
       GameStateSnapshot? gameState,
@@ -90,6 +97,8 @@ class LocalStore {
         rollbackOnFailure: true,
         writes: {
           'story_continuity_${state.characterId}': jsonEncode(state.toJson()),
+          if (reading != null)
+            'story_reading_${state.characterId}': jsonEncode(reading),
           if (history != null)
             _historyKey(history.characterId): jsonEncode(history.toJson()),
           if (memory != null)

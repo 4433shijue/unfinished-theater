@@ -761,6 +761,7 @@ class _FailOnceGameStateStore extends LocalStore {
   @override
   Future<void> commitStoryWorkspace(
       {required StoryContinuityState state,
+      Map<String, dynamic>? reading,
       DialogueHistory? history,
       CharacterMemory? memory,
       GameStateSnapshot? gameState,
@@ -775,6 +776,7 @@ class _FailOnceGameStateStore extends LocalStore {
     }
     await super.commitStoryWorkspace(
         state: state,
+        reading: reading,
         history: history,
         memory: memory,
         gameState: gameState,
@@ -794,6 +796,7 @@ class _FailingMapCommitStore extends LocalStore {
   @override
   Future<void> commitStoryWorkspace(
       {required StoryContinuityState state,
+      Map<String, dynamic>? reading,
       DialogueHistory? history,
       CharacterMemory? memory,
       GameStateSnapshot? gameState,
@@ -808,6 +811,7 @@ class _FailingMapCommitStore extends LocalStore {
     }
     await super.commitStoryWorkspace(
         state: state,
+        reading: reading,
         history: history,
         memory: memory,
         gameState: gameState,

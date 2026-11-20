@@ -13,6 +13,7 @@ class NpcChatThreadScreen extends StatefulWidget {
 }
 
 class _NpcChatThreadScreenState extends State<NpcChatThreadScreen> {
+  final _composerKey = GlobalKey<StoryComposerState>();
   late final ScrollController _scrollController;
   int _lastMessageCount = 0;
   bool _selecting = false;
@@ -387,6 +388,8 @@ class _NpcChatThreadScreenState extends State<NpcChatThreadScreen> {
                                 _selectedMessageIds.contains(message.id);
                             return _NpcMessageBubble(
                               message: message,
+                              onQuote: (selection) =>
+                                  _quoteMessage(message, selection),
                               onRewrite: message.role == NpcMessageRole.npc
                                   ? (selection) => showStoryRewriteDialog(
                                       context, message.id,
@@ -428,7 +431,10 @@ class _NpcChatThreadScreenState extends State<NpcChatThreadScreen> {
                                           .map((m) => m['content']?.toString() ?? '')
                                           .join('\n\n'))))))),
                 const SizedBox(height: 10),
-                ChatInputBar(
+                StoryComposer(
+                  key: _composerKey,
+                  worldId: controller.currentCharacter!.id,
+                  npcId: widget.npcId,
                   isSending: controller.isNpcReplyingTo(widget.npcId),
                   canPause: false,
                   hasPendingMessages:
@@ -455,16 +461,9 @@ class _NpcChatThreadScreenState extends State<NpcChatThreadScreen> {
                       ),
                     ),
                   ),
-                  onSend: (value) async {
-                    final messenger = ScaffoldMessenger.of(context);
-                    final error = await context
-                        .read<AppStateController>()
-                        .queueNpcUserMessage(widget.npcId, value);
-                    if (!mounted || error == null) {
-                      return;
-                    }
-                    messenger.showSnackBar(SnackBar(content: Text(error)));
-                  },
+                  onSend: (value, quote) => context
+                      .read<AppStateController>()
+                      .queueNpcUserMessage(widget.npcId, value, quote: quote),
                   onLaunch: () async {
                     final messenger = ScaffoldMessenger.of(context);
                     final error = await context
@@ -484,6 +483,19 @@ class _NpcChatThreadScreenState extends State<NpcChatThreadScreen> {
     );
   }
 
+  Future<void> _quoteMessage(NpcChatMessage message, String? selection) async {
+    try {
+      final quote = await selectStoryQuote(context, message.id, message.content,
+          selection: selection, npcId: widget.npcId);
+      if (mounted && quote != null) _composerKey.currentState?.setQuote(quote);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
   void _showMessageMenu(NpcChatMessage message) {
     showModalBottomSheet<void>(
       context: context,
@@ -498,6 +510,13 @@ class _NpcChatThreadScreenState extends State<NpcChatThreadScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
+                ListTile(
+                    leading: const Icon(Icons.format_quote),
+                    title: const Text('接这句'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      unawaited(_quoteMessage(message, null));
+                    }),
                 if (message.role == NpcMessageRole.npc)
                   if (message.role == NpcMessageRole.npc)
                     ListTile(

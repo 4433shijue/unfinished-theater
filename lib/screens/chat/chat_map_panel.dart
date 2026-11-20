@@ -17,6 +17,7 @@ class _MapBasketItem {
     this.locationId = '',
     this.riskLevel = '',
     this.timeCost = '',
+    this.quote,
   });
 
   factory _MapBasketItem.location(MapLocationNode location) {
@@ -42,11 +43,12 @@ class _MapBasketItem {
     );
   }
 
-  factory _MapBasketItem.freeAction(String action) {
+  factory _MapBasketItem.freeAction(String action, {StoryQuote? quote}) {
     return _MapBasketItem(
       kind: _MapBasketItemKind.action,
       label: action,
-      actionText: action,
+      actionText: quote == null ? action : '${quote.promptContext}\n$action',
+      quote: quote,
     );
   }
 
@@ -56,6 +58,7 @@ class _MapBasketItem {
   final String locationId;
   final String riskLevel;
   final String timeCost;
+  final StoryQuote? quote;
 
   String get normalizedKey {
     final source = locationId.trim().isNotEmpty ? locationId : actionText;
@@ -271,13 +274,14 @@ class _MapModeQuickActionBar extends StatefulWidget {
     required this.basketCount,
     required this.isBusy,
     required this.onAdd,
+    required this.onOpenComposer,
     required this.onOpenMap,
   });
 
   final int basketCount;
   final bool isBusy;
   final ValueChanged<_MapBasketItem> onAdd;
-  final VoidCallback onOpenMap;
+  final VoidCallback onOpenMap, onOpenComposer;
 
   @override
   State<_MapModeQuickActionBar> createState() => _MapModeQuickActionBarState();
@@ -311,6 +315,10 @@ class _MapModeQuickActionBarState extends State<_MapModeQuickActionBar> {
               onSubmitted: (_) => _submit(),
             ),
           ),
+          IconButton(
+              tooltip: '写作小工具',
+              icon: const Icon(Icons.edit_note),
+              onPressed: widget.isBusy ? null : widget.onOpenComposer),
           const SizedBox(width: 8),
           IconButton.filledTonal(
             style: AppTheme.skinIconButtonStyle(),

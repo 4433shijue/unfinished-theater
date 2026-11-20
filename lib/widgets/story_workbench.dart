@@ -1,3 +1,4 @@
+import 'director_phrases.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../controllers/app_state_controller.dart';
@@ -347,12 +348,15 @@ class _StoryRewriteDialogState extends State<_StoryRewriteDialog> {
   }
 }
 
-Future<void> showDirectorPreferencesDialog(BuildContext context) =>
+Future<void> showDirectorPreferencesDialog(BuildContext context,
+        {String appendNote = ''}) =>
     showDialog<void>(
-        context: context, builder: (_) => const _DirectorPreferencesDialog());
+        context: context,
+        builder: (_) => _DirectorPreferencesDialog(appendNote: appendNote));
 
 class _DirectorPreferencesDialog extends StatefulWidget {
-  const _DirectorPreferencesDialog();
+  const _DirectorPreferencesDialog({this.appendNote = ''});
+  final String appendNote;
   @override
   State<_DirectorPreferencesDialog> createState() =>
       _DirectorPreferencesDialogState();
@@ -382,6 +386,11 @@ class _DirectorPreferencesDialogState
   void initState() {
     super.initState();
     load();
+    if (widget.appendNote.isNotEmpty) {
+      note.text = note.text.isEmpty
+          ? widget.appendNote
+          : '${note.text}\n${widget.appendNote}';
+    }
   }
 
   @override
@@ -408,8 +417,12 @@ class _DirectorPreferencesDialogState
                       DropdownMenuItem(value: 'story', child: Text('本剧本'))
                     ],
                     onChanged: (v) => setState(() {
+                          final pendingNote = note.text;
                           scope = v!;
                           load();
+                          if (pendingNote.trim().isNotEmpty) {
+                            note.text = pendingNote;
+                          }
                         })),
                 const SizedBox(height: 8),
                 const Text('本回合优先，其次本场景和本剧本。留空的项目沿用下一级偏好。'),
@@ -426,6 +439,7 @@ class _DirectorPreferencesDialogState
                           .toList(),
                       onChanged: (v) =>
                           values[entry.key] = v == '沿用剧本' ? '' : v!),
+                DirectorPhrases(note: note),
                 TextField(
                     controller: note,
                     minLines: 2,

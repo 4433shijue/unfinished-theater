@@ -11,6 +11,8 @@ class AppSettings {
     required this.memoryContextItems,
     required this.uiScale,
     required this.themeId,
+    this.fullTurnSettlement = false,
+    this.directorPhrases = const {},
     this.memoryApiUrl = '',
     this.memoryApiKey = '',
     this.memoryModelName = '',
@@ -43,6 +45,11 @@ class AppSettings {
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
     return AppSettings(
+      fullTurnSettlement: json['fullTurnSettlement'] == true,
+      directorPhrases: json['directorPhrases'] is Map
+          ? (json['directorPhrases'] as Map)
+              .map((k, v) => MapEntry(k.toString(), v.toString()))
+          : const {},
       apiUrl: json['apiUrl']?.toString() ?? '',
       apiKey: json['apiKey']?.toString() ?? '',
       modelName: json['modelName']?.toString() ?? 'gpt-4o-mini',
@@ -69,6 +76,8 @@ class AppSettings {
     );
   }
 
+  final bool fullTurnSettlement;
+  final Map<String, String> directorPhrases;
   final String apiUrl;
   final String apiKey;
   final String modelName;
@@ -131,6 +140,8 @@ class AppSettings {
   }
 
   AppSettings copyWith({
+    bool? fullTurnSettlement,
+    Map<String, String>? directorPhrases,
     String? apiUrl,
     String? apiKey,
     String? modelName,
@@ -151,6 +162,8 @@ class AppSettings {
     bool? allowInsecureMemoryApi,
   }) {
     return AppSettings(
+      fullTurnSettlement: fullTurnSettlement ?? this.fullTurnSettlement,
+      directorPhrases: directorPhrases ?? this.directorPhrases,
       apiUrl: apiUrl ?? this.apiUrl,
       apiKey: apiKey ?? this.apiKey,
       modelName: modelName ?? this.modelName,
@@ -177,6 +190,8 @@ class AppSettings {
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
+      'fullTurnSettlement': fullTurnSettlement,
+      'directorPhrases': directorPhrases,
       'apiUrl': apiUrl,
       'apiKey': apiKey,
       'modelName': modelName,

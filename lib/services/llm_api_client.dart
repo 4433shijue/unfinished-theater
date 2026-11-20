@@ -1,3 +1,4 @@
+import 'choice_strategy.dart';
 import '../models/story_opening_draft.dart';
 import 'narrative_content.dart';
 import 'inline_theater_contract.dart';
@@ -434,7 +435,7 @@ class LlmApiClient {
   }) async {
     final transcript = messages.map((message) {
       final speaker = message.role == ChatRole.user ? '用户' : character.name;
-      return '$speaker: ${message.role == ChatRole.assistant ? MessageContentParser.contextTextForModel(message.content) : message.content}';
+      return '$speaker: ${message.role == ChatRole.assistant ? MessageContentParser.contextTextForModel(message.content) : message.modelContent}';
     }).join('\n');
 
     return _postChatCompletion(
@@ -890,7 +891,7 @@ $raw''',
     final choicesInstruction = mapMode
         ? '不输出 [CHOICES]。保留或补齐独立 [MAP_STATE] JSON 块，下一步行动放入 activeChoices；已有地点、行动 ID 和行动结果不得擅自改写。'
         : character.nextStepOptionsEnabled
-            ? '最后必须输出一个 [CHOICES] 选项块，正好 ${character.preferredChoiceCount} 行：A|行动文本 到 $lastChoice|行动文本。'
+            ? '最后必须输出一个 [CHOICES] 选项块，正好 ${character.preferredChoiceCount} 行：A|行动文本 到 $lastChoice|行动文本。${character.isTutorialDemo ? '' : ChoiceStrategy.instruction}'
             : '当前角色关闭下一步选项，禁止输出 [CHOICES]。';
     final htmlInstruction = character.requiresHtmlPanel
         ? '2. 补齐或修复唯一的可点击番外，保留正文与有效状态。\n${InlineTheaterContract.prompt(character.inlineTheaterSettings, character.inlineTheaterSettings.themeForTurn(0))}'
@@ -1109,7 +1110,7 @@ $originalReply
     required void Function() useCurrentEnvelope,
     required bool preferExactAssistantReplay,
   }) {
-    final trimmed = message.content.trim();
+    final trimmed = message.modelContent.trim();
     if (message.role == ChatRole.assistant &&
         preferExactAssistantReplay &&
         message.providerReplayExact) {
@@ -1869,7 +1870,7 @@ ${character.gameplaySystem == null ? '' : '4. [GAME_STATE] 后必须输出独立
 4. [THEATER_PATCH]：独立 JSON 变量补丁，必须放在 [GAME_STATE] 之后${character.nextStepOptionsEnabled ? '、[CHOICES] 之前' : ''}；逐项核对本轮事实，已触发的变化必须写入 ops，确实没有变量变化时才输出 {"ops":[]}。''';
     final choicesBlock = character.nextStepOptionsEnabled
         ? '''
-5. [CHOICES]：最后输出，正好 A-F 六个可执行行动；不要把正文、HTML、[GAME_STATE] 或 [THEATER_PATCH] 混进选项。'''
+5. [CHOICES]：最后输出，正好 A-F 六个可执行行动；${ChoiceStrategy.instruction}不要把正文、HTML、[GAME_STATE] 或 [THEATER_PATCH] 混进选项。'''
         : '''
 5. 当前角色关闭“下一步选项”，不要输出 [CHOICES]，也不要在正文里伪装 A/B/C/D/E/F 选项。''';
 

@@ -1,3 +1,4 @@
+import 'story_composer.dart';
 import 'npc_runtime.dart';
 import 'npc_story_state.dart';
 
@@ -781,12 +782,16 @@ class NpcChatMessage {
     required this.content,
     required this.timestamp,
     required this.batchId,
+    this.quote,
     this.innerVoice = '',
     this.innerVoiceGeneratedAt,
   });
 
   factory NpcChatMessage.fromJson(Map<String, dynamic> json) {
     return NpcChatMessage(
+      quote: json['quote'] is Map
+          ? StoryQuote.fromJson(Map<String, dynamic>.from(json['quote'] as Map))
+          : null,
       id: json['id']?.toString() ?? '',
       npcId: json['npcId']?.toString() ?? '',
       role: NpcMessageRoleX.fromValue(json['role']?.toString()),
@@ -800,6 +805,9 @@ class NpcChatMessage {
     );
   }
 
+  final StoryQuote? quote;
+  String get modelContent =>
+      quote == null ? content : '${quote!.promptContext}\n$content';
   final String id;
   final String npcId;
   final NpcMessageRole role;
@@ -810,6 +818,7 @@ class NpcChatMessage {
   final DateTime? innerVoiceGeneratedAt;
 
   NpcChatMessage copyWith({
+    StoryQuote? quote,
     String? id,
     String? npcId,
     NpcMessageRole? role,
@@ -820,6 +829,7 @@ class NpcChatMessage {
     DateTime? innerVoiceGeneratedAt,
   }) {
     return NpcChatMessage(
+      quote: quote ?? this.quote,
       id: id ?? this.id,
       npcId: npcId ?? this.npcId,
       role: role ?? this.role,
@@ -834,6 +844,7 @@ class NpcChatMessage {
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
+      if (quote != null) 'quote': quote!.toJson(),
       'id': id,
       'npcId': npcId,
       'role': role.name,

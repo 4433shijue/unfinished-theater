@@ -10,6 +10,7 @@ class _NpcMessageBubble extends StatelessWidget {
     this.selecting = false,
     this.onTap,
     this.onLongPress,
+    this.onQuote,
     this.onRewrite,
   });
 
@@ -22,6 +23,7 @@ class _NpcMessageBubble extends StatelessWidget {
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final void Function(String)? onRewrite;
+  final void Function(String)? onQuote;
 
   @override
   Widget build(BuildContext context) {
@@ -86,6 +88,13 @@ class _NpcMessageBubble extends StatelessWidget {
                                 ),
                       ),
                       const SizedBox(height: 4),
+                      if (message.quote != null)
+                        TextButton.icon(
+                            icon: const Icon(Icons.format_quote, size: 16),
+                            onPressed: () =>
+                                showQuoteSource(context, message.quote!),
+                            label: Text(message.quote!.text,
+                                maxLines: 2, overflow: TextOverflow.ellipsis)),
                       SelectableText(
                         message.content,
                         contextMenuBuilder: (context, editable) =>
@@ -93,6 +102,16 @@ class _NpcMessageBubble extends StatelessWidget {
                                 anchors: editable.contextMenuAnchors,
                                 buttonItems: [
                               ...editable.contextMenuButtonItems,
+                              if (onQuote != null)
+                                ContextMenuButtonItem(
+                                    label: '接这句',
+                                    onPressed: () {
+                                      final text = editable
+                                          .textEditingValue.selection
+                                          .textInside(message.content);
+                                      editable.hideToolbar();
+                                      onQuote!(text);
+                                    }),
                               if (onRewrite != null)
                                 ContextMenuButtonItem(
                                     label: '局部改写',

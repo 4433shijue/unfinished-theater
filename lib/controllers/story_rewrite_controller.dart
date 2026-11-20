@@ -544,12 +544,19 @@ extension StoryRewriteController on AppStateController {
             messages: [...world.messages, ...batch]).toJson()
       };
     }
+    next.data['reading'] = {
+      'privateNote': {'text': await loadPrivateNote(source.id)}
+    };
     next.data['npcMigrationVersion'] = 1;
     next.data['npcScopeLocked'] = true;
     var branchHistory = DialogueHistory(
         characterId: branchId,
         messages: messages
             .map((m) => m.copyWith(
+                quote: m.quote == null
+                    ? null
+                    : StoryQuote.fromJson(
+                        {...m.quote!.toJson(), 'worldId': branchId}),
                 isSummarized: false,
                 clearPromptReplayContent: true,
                 clearProviderReplayContent: true,
@@ -640,6 +647,9 @@ extension StoryRewriteController on AppStateController {
           ..addAll(originalMessages);
       }
     }
+    next = StoryContinuityState(
+        characterId: branchId,
+        data: storyMap(_remapStoryIds(next.toJson(), {source.id: branchId})));
     final branchMap = _mapStateForBranch(
         (checkpoint['mapAfter'] ?? checkpoint['mapState']) is Map
             ? MapWorldState.fromJson(
@@ -650,6 +660,7 @@ extension StoryRewriteController on AppStateController {
     await _store.commitStoryWorkspace(
         state: next,
         history: branchHistory,
+        reading: next.reading,
         memory: branchMemory,
         gameState: before,
         mapState: branchMap,

@@ -1,3 +1,5 @@
+import 'story_composer.dart';
+
 enum ChatRole {
   user,
   assistant,
@@ -28,6 +30,9 @@ class ChatMessage {
     required this.content,
     required this.timestamp,
     required this.isSummarized,
+    this.quote,
+    this.choiceOverride,
+    this.choiceSourceDigest,
     this.inlineTheaterThemeId,
     this.isBookmarked = false,
     this.bookmarkNote = '',
@@ -40,6 +45,11 @@ class ChatMessage {
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
+      quote: json['quote'] is Map
+          ? StoryQuote.fromJson(Map<String, dynamic>.from(json['quote'] as Map))
+          : null,
+      choiceOverride: json['choiceOverride']?.toString(),
+      choiceSourceDigest: json['choiceSourceDigest']?.toString(),
       id: json['id']?.toString() ?? '',
       role: ChatRoleX.fromValue(json['role']?.toString()),
       content: json['content']?.toString() ?? '',
@@ -59,6 +69,22 @@ class ChatMessage {
     );
   }
 
+  final StoryQuote? quote;
+  final String? choiceOverride, choiceSourceDigest;
+  String get modelContent =>
+      quote == null ? content : '${quote!.promptContext}\n$content';
+  String get displayContent {
+    if (choiceOverride == null ||
+        choiceSourceDigest != StoryQuote.digest(content)) {
+      return content;
+    }
+    final pattern =
+        RegExp(r'\[CHOICES\][\s\S]*?\[/CHOICES\]', caseSensitive: false);
+    return pattern.hasMatch(content)
+        ? content.replaceFirst(pattern, choiceOverride!)
+        : '$content\n$choiceOverride';
+  }
+
   final String id;
   final ChatRole role;
   final String content;
@@ -74,6 +100,10 @@ class ChatMessage {
   final bool providerReplayExact;
 
   ChatMessage copyWith({
+    StoryQuote? quote,
+    bool clearQuote = false,
+    String? choiceOverride,
+    String? choiceSourceDigest,
     String? id,
     ChatRole? role,
     String? content,
@@ -93,6 +123,9 @@ class ChatMessage {
     bool? providerReplayExact,
   }) {
     return ChatMessage(
+      quote: clearQuote ? null : quote ?? this.quote,
+      choiceOverride: choiceOverride ?? this.choiceOverride,
+      choiceSourceDigest: choiceSourceDigest ?? this.choiceSourceDigest,
       id: id ?? this.id,
       role: role ?? this.role,
       content: content ?? this.content,
@@ -118,6 +151,9 @@ class ChatMessage {
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
+      if (quote != null) 'quote': quote!.toJson(),
+      if (choiceOverride != null) 'choiceOverride': choiceOverride,
+      if (choiceSourceDigest != null) 'choiceSourceDigest': choiceSourceDigest,
       'id': id,
       'role': role.name,
       'content': content,

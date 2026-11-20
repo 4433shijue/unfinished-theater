@@ -1,3 +1,4 @@
+import '../services/choice_strategy.dart';
 import 'inline_theater_settings.dart';
 import '../services/inline_theater_contract.dart';
 import 'model_params.dart';
@@ -216,6 +217,7 @@ class CharacterProfile {
 
     if (nextStepOptionsEnabled && !mapModeEnabled) {
       buffer
+        ..writeln(ChoiceStrategy.instruction)
         ..writeln('当前角色开启“下一步选项”。正式剧情回复必须在整条回复最底部输出一个 [CHOICES] 选项块。')
         ..writeln(
             '选项永远放在全部正文、全部 HTML、全部气泡、[GAME_STATE]${gameplaySystem == null ? '' : ' 和 [THEATER_PATCH]'}之后。')

@@ -1,3 +1,5 @@
+import 'story_composer.dart';
+import '../services/choice_strategy.dart';
 import '../services/inline_theater_contract.dart';
 import '../services/narrative_content.dart';
 import '../services/html_interaction_bridge.dart';
@@ -29,6 +31,8 @@ class ChatMessageBubble extends StatefulWidget {
     this.streamingElapsedSeconds = 0,
     this.onCopy,
     this.onEdit,
+    this.onQuote,
+    this.onRefreshChoices,
     this.onRewrite,
     this.onRememberFact,
     this.onDelete,
@@ -64,6 +68,8 @@ class ChatMessageBubble extends StatefulWidget {
   final int streamingElapsedSeconds;
   final VoidCallback? onCopy;
   final VoidCallback? onEdit;
+  final ValueChanged<String?>? onQuote;
+  final VoidCallback? onRefreshChoices;
   final ValueChanged<String?>? onRewrite;
   final VoidCallback? onRememberFact;
   final VoidCallback? onDelete;
@@ -243,8 +249,16 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
                           ],
                         ),
                         const SizedBox(height: 10),
+                        if (widget.message.quote != null)
+                          TextButton.icon(
+                              onPressed: () => showQuoteSource(
+                                  context, widget.message.quote!),
+                              icon: const Icon(Icons.format_quote, size: 16),
+                              label: Text(widget.message.quote!.text,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis)),
                         SelectableText(
-                          widget.message.content,
+                          widget.message.displayContent,
                           style: theme.textTheme.bodyLarge?.copyWith(
                             height: 1.58,
                             color: customTextColor ?? userTextColor,
@@ -403,9 +417,16 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
                       color: AppTheme.assistantBubbleTextColor,
                     ),
                   ],
+                  if (parsed.choices.isEmpty && widget.onRefreshChoices != null)
+                    TextButton.icon(
+                        onPressed: widget.onRefreshChoices,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('生成六个选项')),
                   if (parsed.choices.isNotEmpty) ...<Widget>[
                     if (parsed.blocks.isNotEmpty) const SizedBox(height: 12),
                     _ChoicePanel(
+                      key: ValueKey(widget.message.displayContent),
+                      onRefresh: widget.onRefreshChoices,
                       choices: parsed.choices,
                       onChoicesSelected:
                           widget.isStreaming ? null : widget.onChoicesSelected,
@@ -461,6 +482,9 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
     if (parsed.groupChatMessages.isNotEmpty) {
       return <Widget>[
         _GroupChatMessageFlow(
+          onQuote: widget.onQuote == null
+              ? null
+              : () => widget.onQuote!(_storySelectedText),
           onSelectedText: (text) => _storySelectedText = text,
           onRewrite: widget.onRewrite == null
               ? null
@@ -512,6 +536,13 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
                     anchors: region.contextMenuAnchors,
                     buttonItems: [
                   ...region.contextMenuButtonItems,
+                  if (widget.onQuote != null)
+                    ContextMenuButtonItem(
+                        label: '接这句',
+                        onPressed: () {
+                          region.hideToolbar();
+                          widget.onQuote!(_storySelectedText);
+                        }),
                   if (widget.onRewrite != null)
                     ContextMenuButtonItem(
                         label: '局部改写',
@@ -603,6 +634,19 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
   }
 
   Widget _buildActionBar({required bool isUser}) {
+    if (MediaQuery.sizeOf(context).width < 600) {
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        if (widget.onQuote != null)
+          IconButton(
+              tooltip: '接这句',
+              onPressed: () => widget.onQuote!(_storySelectedText),
+              icon: const Icon(Icons.format_quote)),
+        IconButton(
+            tooltip: isUser ? '消息操作' : '回复操作',
+            onPressed: () => _openActionSheet(isUser),
+            icon: const Icon(Icons.more_horiz)),
+      ]);
+    }
     final lightPalette = AppTheme.isLightPaletteMode;
     final iconColor = lightPalette ? AppTheme.textMain : Colors.white;
     return DecoratedBox(
@@ -628,6 +672,12 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
               onTap: widget.onCopy,
               color: iconColor,
             ),
+            if (widget.onQuote != null)
+              _ActionIcon(
+                  tooltip: '接这句',
+                  icon: Icons.format_quote,
+                  onTap: () => widget.onQuote!(_storySelectedText),
+                  color: iconColor),
             if (!isUser && widget.onRewrite != null)
               _ActionIcon(
                   tooltip: '局部重写 / 版本',
@@ -701,6 +751,11 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
     }
 
     final actions = <_MessageAction>[
+      if (widget.onQuote != null)
+        _MessageAction(
+            label: '接这句',
+            icon: Icons.format_quote,
+            onTap: () => widget.onQuote!(_storySelectedText)),
       if (!isUser && widget.onRewrite != null)
         _MessageAction(
             label: '局部重写 / 版本',
@@ -877,7 +932,8 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
 
   String get _sanitizedAssistantContent {
     if (!widget.isStreaming) {
-      return MessageContentParser.normalizeChoiceBlocks(widget.message.content);
+      return MessageContentParser.normalizeChoiceBlocks(
+          widget.message.displayContent);
     }
 
     if (!widget.streamingTextEnabled) {
@@ -885,7 +941,7 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
     }
 
     final text = MessageContentParser.visibleStreamingText(
-      widget.message.content,
+      widget.message.displayContent,
     );
     final docs = NarrativeContent.htmlDocuments(widget.message.content);
     final ready = docs.length == 1 &&
@@ -2436,6 +2492,7 @@ class _GroupChatMessageFlow extends StatelessWidget {
     this.onMention,
     this.onReply,
     this.onSelectedText,
+    this.onQuote,
     this.onRewrite,
   });
 
@@ -2444,6 +2501,7 @@ class _GroupChatMessageFlow extends StatelessWidget {
   final ValueChanged<GroupChatMessage>? onMention;
   final ValueChanged<GroupChatMessage>? onReply;
   final ValueChanged<String?>? onSelectedText;
+  final VoidCallback? onQuote;
   final VoidCallback? onRewrite;
 
   @override
@@ -2463,6 +2521,7 @@ class _GroupChatMessageFlow extends StatelessWidget {
             onMention: onMention,
             onReply: onReply,
             onSelectedText: onSelectedText,
+            onQuote: onQuote,
             onRewrite: onRewrite,
           ),
           if (index != messages.length - 1) const SizedBox(height: 9),
@@ -2505,6 +2564,7 @@ class _GroupChatBubble extends StatelessWidget {
     this.onMention,
     this.onReply,
     this.onSelectedText,
+    this.onQuote,
     this.onRewrite,
   });
 
@@ -2514,6 +2574,7 @@ class _GroupChatBubble extends StatelessWidget {
   final ValueChanged<GroupChatMessage>? onMention;
   final ValueChanged<GroupChatMessage>? onReply;
   final ValueChanged<String?>? onSelectedText;
+  final VoidCallback? onQuote;
   final VoidCallback? onRewrite;
 
   static const List<Color> _speakerPalette = <Color>[
@@ -2659,6 +2720,13 @@ class _GroupChatBubble extends StatelessWidget {
                               anchors: region.contextMenuAnchors,
                               buttonItems: [
                             ...region.contextMenuButtonItems,
+                            if (onQuote != null)
+                              ContextMenuButtonItem(
+                                  label: '接这句',
+                                  onPressed: () {
+                                    region.hideToolbar();
+                                    onQuote!();
+                                  }),
                             if (onRewrite != null)
                               ContextMenuButtonItem(
                                   label: '局部改写',
@@ -2859,12 +2927,15 @@ class _PreviewPlaceholder extends StatelessWidget {
 
 class _ChoicePanel extends StatefulWidget {
   const _ChoicePanel({
+    super.key,
+    this.onRefresh,
     required this.choices,
     required this.onChoicesSelected,
     required this.onPreviewChoice,
     required this.onResetChoices,
   });
 
+  final VoidCallback? onRefresh;
   final List<MessageChoice> choices;
   final ValueChanged<List<String>>? onChoicesSelected;
   final Future<void> Function(MessageChoice choice)? onPreviewChoice;
@@ -2924,6 +2995,11 @@ class _ChoicePanelState extends State<_ChoicePanel> {
                       ),
                 ),
               ),
+              if (widget.onRefresh != null)
+                IconButton(
+                    tooltip: '换一组选项',
+                    icon: const Icon(Icons.refresh),
+                    onPressed: widget.onRefresh),
               if (_selectedIndexes.isNotEmpty)
                 TextButton.icon(
                   onPressed: _enabled ? _reset : null,
@@ -2942,6 +3018,10 @@ class _ChoicePanelState extends State<_ChoicePanel> {
               ),
             ],
           ),
+          if (ChoiceStrategy.issues(widget.choices,
+                  count: widget.choices.length == 3 ? 3 : 6)
+              .isNotEmpty)
+            const Text('这组选项不完整或有重复，可以换一组。'),
           if (_expanded) ...<Widget>[
             const SizedBox(height: 12),
             for (var index = 0;
@@ -3227,7 +3307,7 @@ class _ActionIcon extends StatelessWidget {
       child: IconButton(
         visualDensity: VisualDensity.compact,
         onPressed: onTap,
-        icon: Icon(icon, size: 18, color: color),
+        icon: Icon(icon, size: 18, color: color, semanticLabel: tooltip),
       ),
     );
   }

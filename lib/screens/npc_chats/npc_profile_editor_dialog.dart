@@ -94,6 +94,12 @@ class _NpcProfileEditorDialogState extends State<_NpcProfileEditorDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
+                if (!_isCreating)
+                  TextButton.icon(
+                      onPressed: () =>
+                          showNpcAddressingDialog(context, widget.profile!.id),
+                      icon: const Icon(Icons.badge_outlined),
+                      label: const Text('专属称呼')),
                 if (widget.profile != null &&
                     widget.profile!.storyState.publicIdentity.isNotEmpty)
                   StoryExpansionSection(title: const Text('剧情档案'), children: [

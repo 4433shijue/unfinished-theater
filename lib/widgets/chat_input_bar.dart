@@ -11,6 +11,9 @@ class ChatInputBar extends StatefulWidget {
     required this.hasPendingMessages,
     required this.onSend,
     required this.onLaunch,
+    this.sendLabel = '发送',
+    this.launchLabel = '提交并生成回复',
+    this.onDraftChanged,
     this.draftText,
     this.draftVersion = 0,
     this.leading,
@@ -27,6 +30,8 @@ class ChatInputBar extends StatefulWidget {
   final bool hasPendingMessages;
   final Future<void> Function(String value) onSend;
   final Future<void> Function() onLaunch;
+  final String sendLabel, launchLabel;
+  final ValueChanged<String>? onDraftChanged;
   final String? draftText;
   final int draftVersion;
   final Widget? leading;
@@ -58,13 +63,15 @@ class ChatQuickAction {
 }
 
 class _ChatInputBarState extends State<ChatInputBar> {
+  bool _submitting = false;
   late final TextEditingController _controller;
   late final FocusNode _focusNode;
 
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController()..addListener(_handleTextChanged);
+    _controller = TextEditingController(text: widget.draftText ?? '')
+      ..addListener(_handleTextChanged);
     _focusNode = FocusNode();
   }
 
@@ -78,11 +85,15 @@ class _ChatInputBarState extends State<ChatInputBar> {
         text: nextText,
         selection: TextSelection.collapsed(offset: nextText.length),
       );
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          _focusNode.requestFocus();
-        }
-      });
+      // Restoring a disabled/loading composer must not steal focus from a
+      // dialog or attach a web text-input client before its surface is ready.
+      if (widget.enabled && oldWidget.enabled) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _focusNode.requestFocus();
+          }
+        });
+      }
     }
   }
 
@@ -98,6 +109,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   @override
   Widget build(BuildContext context) {
     final canSend = widget.enabled &&
+        !_submitting &&
         _controller.text.trim().isNotEmpty &&
         !widget.isSending;
     final canLaunch = widget.enabled &&
@@ -243,9 +255,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                   ),
                                 ),
                               ),
-                              child: const Icon(
+                              child: Icon(
                                 Icons.send_rounded,
-                                semanticLabel: '发送消息',
+                                semanticLabel: widget.sendLabel == '发送'
+                                    ? '发送消息'
+                                    : widget.sendLabel,
                               ),
                             )
                           : FilledButton.icon(
@@ -274,7 +288,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                 ),
                               ),
                               icon: const Icon(Icons.send_rounded),
-                              label: Text(AppTheme.glitchText('发送')),
+                              label:
+                                  Text(AppTheme.glitchText(widget.sendLabel)),
                             ),
                       SizedBox(width: 8 * uiScale),
                       Tooltip(
@@ -284,7 +299,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                               ? widget.disabledHint!.trim()
                               : widget.canPause
                                   ? '暂停当前回复'
-                                  : '把已经发送的用户消息一起提交给角色回复',
+                                  : widget.launchLabel,
                         ),
                         child: Container(
                           decoration: BoxDecoration(
@@ -317,7 +332,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                     : Icon(
                                         Icons.near_me_rounded,
                                         color: actionForeground,
-                                        semanticLabel: '提交并生成回复',
+                                        semanticLabel: widget.launchLabel,
                                       ),
                           ),
                         ),
@@ -342,8 +357,20 @@ class _ChatInputBarState extends State<ChatInputBar> {
     if (widget.tutorialTargetsEnabled) {
       TutorialTargetRegistry.report(TutorialTargetId.chatSend);
     }
-    _controller.clear();
-    await widget.onSend(text);
+    if (_submitting) return;
+    final original = _controller.text;
+    setState(() => _submitting = true);
+    try {
+      await widget.onSend(text);
+      if (mounted && _controller.text == original) _controller.clear();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$error')));
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
   }
 
   Future<void> _launch() async {
@@ -357,6 +384,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   void _handleTextChanged() {
+    widget.onDraftChanged?.call(_controller.text);
     if (mounted) {
       setState(() {});
     }

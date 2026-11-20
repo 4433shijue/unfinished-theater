@@ -29,6 +29,35 @@ class ReleaseNotes {
 }
 
 const ReleaseNotes currentReleaseNotes = ReleaseNotes(
+  id: 'v2.16.0',
+  version: 'V2.16.0',
+  title: 'V2.16.0 接住这句话，走一条意想不到的路',
+  subtitle: '聊天小工具与六条不同路线，轻轻添一点新鲜感。',
+  items: [
+    ReleaseNoteItem(
+        icon: Icons.alt_route,
+        title: '六个选项，六种走向',
+        description: 'A 到 F 逐级出人意料，F 可以世界内极限荒诞。保留多选，也能只换选项，不重写正文。'),
+    ReleaseNoteItem(
+        icon: Icons.format_quote,
+        title: '接这句，帮我说出来',
+        description: '选中正文引用接话，把自己的意思变成两种短表达；采用后仍可编辑，自己决定何时发送。'),
+    ReleaseNoteItem(
+        icon: Icons.edit_note,
+        title: '把灵感放在手边',
+        description: '每个剧本一张私人便签，导演台可收藏常用短语；便签只在主动带入时发给模型。'),
+    ReleaseNoteItem(
+        icon: Icons.badge_outlined,
+        title: '只属于这个世界的称呼',
+        description: '在 NPC 详情填写双方称呼和使用条件，身份与关系仍按故事发展。'),
+    ReleaseNoteItem(
+        icon: Icons.receipt_long,
+        title: '安静读完这一回合',
+        description: '结算默认在正文下简要展示，点开查看全部；设置里可以恢复每轮弹窗。草稿成功保存到聊天后才清空。'),
+  ],
+);
+
+const ReleaseNotes _v2150ReleaseNotes = ReleaseNotes(
   id: 'v2.15.0',
   version: 'V2.15.0',
   title: 'V2.15.0 人物与世界一起成长',
@@ -1843,6 +1872,7 @@ const ReleaseNotes _v210ReleaseNotes = ReleaseNotes(
 
 const List<ReleaseNotes> releaseNotesHistory = <ReleaseNotes>[
   currentReleaseNotes,
+  _v2150ReleaseNotes,
   _v2140ReleaseNotes,
   _v2131ReleaseNotes,
   _v2130ReleaseNotes,

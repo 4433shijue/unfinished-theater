@@ -1,3 +1,5 @@
+import '../models/story_composer.dart';
+import '../widgets/story_composer.dart';
 import '../widgets/turn_settlement_dialog.dart';
 import '../models/story_continuity.dart';
 import '../widgets/story_anchored_list.dart';
@@ -119,7 +121,8 @@ class _DirectorInputButton extends StatelessWidget {
             Positioned.fill(
               child: IconButton.filledTonal(
                 onPressed: onPressed,
-                icon: const Icon(Icons.tune_rounded),
+                icon: Icon(Icons.tune_rounded,
+                    semanticLabel: active ? '本轮导演指令已设置' : '设置下一回合导演指令'),
               ),
             ),
             if (active)
@@ -144,6 +147,7 @@ class _DirectorInputButton extends StatelessWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
+  final _composerKey = GlobalKey<StoryComposerState>();
   final _storyListKey = GlobalKey<StoryAnchoredListState>();
   late final ScrollController _scrollController;
   bool _settlementShowing = false;
@@ -214,7 +218,9 @@ class _ChatScreenState extends State<ChatScreen> {
       isSending: controller.isSending,
     );
     _scheduleNpcLetterNotice(controller);
-    if (!_settlementShowing &&
+    if ((controller.settings.fullTurnSettlement ||
+            controller.unreadTurnSettlement?.complete == false) &&
+        !_settlementShowing &&
         ModalRoute.of(context)?.isCurrent == true &&
         !controller.isSending &&
         controller.currentTabIndex == 0 &&
@@ -506,6 +512,12 @@ class _ChatScreenState extends State<ChatScreen> {
                                             _enterBatchSelection(message.id),
                                         onCopy: () => _copyMessage(message),
                                         onEdit: () => _editMessage(message),
+                                        onQuote: (selection) =>
+                                            _quoteMessage(message, selection),
+                                        onRefreshChoices: controller
+                                                .canRefreshChoices(message)
+                                            ? () => _refreshChoices(message.id)
+                                            : null,
                                         onRewrite: message.role ==
                                                     ChatRole.assistant &&
                                                 !controller.isSending
@@ -651,9 +663,12 @@ class _ChatScreenState extends State<ChatScreen> {
                                 basketCount: _mapBasket.length,
                                 isBusy: controller.isMapGenerating,
                                 onAdd: _addMapBasketItem,
+                                onOpenComposer: () => _openMapComposer(),
                                 onOpenMap: _openMapMode,
                               )
-                            : ChatInputBar(
+                            : StoryComposer(
+                                key: _composerKey,
+                                worldId: character.id,
                                 edgeToEdge: mobileEdgeToEdge,
                                 leading: _DirectorInputButton(
                                   active:
@@ -678,20 +693,9 @@ class _ChatScreenState extends State<ChatScreen> {
                                             ? _stageQuickActions
                                             : const <ChatQuickAction>[],
                                 onQuickActionSelected: _fillInputWithText,
-                                onSend: (value) async {
-                                  final appState =
-                                      context.read<AppStateController>();
-                                  final messenger =
-                                      ScaffoldMessenger.of(context);
-                                  final error =
-                                      await appState.queueUserMessage(value);
-                                  if (!mounted || error == null) {
-                                    return;
-                                  }
-                                  messenger.showSnackBar(
-                                    SnackBar(content: Text(error)),
-                                  );
-                                },
+                                onSend: (value, quote) => context
+                                    .read<AppStateController>()
+                                    .queueUserMessage(value, quote: quote),
                                 onLaunch: () async {
                                   final appState =
                                       context.read<AppStateController>();
@@ -1044,6 +1048,14 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _submitMapBasket(String timeStep) async {
     final items = List<_MapBasketItem>.from(_mapBasket);
+    final app = context.read<AppStateController>();
+    if (items.any((item) =>
+        item.quote != null &&
+        (item.quote!.worldId != app.currentCharacter?.id ||
+            !app.quoteIsCurrent(item.quote!)))) {
+      _showTopNotice(context, '引用原文已变化，请移除对应行动后重新引用。', isError: true);
+      return;
+    }
     final actions = items
         .where((item) => item.kind != _MapBasketItemKind.location)
         .map((item) => item.actionText)
@@ -1658,6 +1670,79 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _quoteMessage(ChatMessage message, String? selection) async {
+    try {
+      final quote = await selectStoryQuote(context, message.id, message.content,
+          selection: selection);
+      if (mounted && quote != null) {
+        if (context
+                .read<AppStateController>()
+                .currentCharacter
+                ?.mapModeEnabled ==
+            true) {
+          await _openMapComposer(quote: quote);
+        } else {
+          _composerKey.currentState?.setQuote(quote);
+        }
+      }
+    } catch (e) {
+      if (mounted) _showTopNotice(context, '$e');
+    }
+  }
+
+  Future<void> _openMapComposer({StoryQuote? quote}) async {
+    final app = context.read<AppStateController>();
+    final world = app.currentCharacter!.id;
+    final key = GlobalKey<StoryComposerState>();
+    if (quote != null) {
+      await app.saveComposerDraft(
+          world,
+          ComposerDraft(
+              text: (await app.loadComposerDraft(world)).text, quote: quote));
+    }
+    if (!mounted) return;
+    final openMap = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+                title: const Text('写地图行动'),
+                content: SizedBox(
+                    width: 600,
+                    child: SingleChildScrollView(
+                        child: StoryComposer(
+                      key: key,
+                      worldId: world,
+                      isSending: app.isMapGenerating,
+                      canPause: false,
+                      hasPendingMessages: true,
+                      tutorialTargetsEnabled: false,
+                      sendLabel: '加入行动篮子',
+                      launchLabel: '打开地图与行动篮子',
+                      onSend: (text, reference) async {
+                        if (app.currentCharacter?.id != world) return '剧本已切换。';
+                        _addMapBasketItem(
+                            _MapBasketItem.freeAction(text, quote: reference));
+                        return null;
+                      },
+                      onLaunch: () async {
+                        Navigator.pop(dialogContext, true);
+                      },
+                    ))),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      child: const Text('关闭'))
+                ]));
+    if (mounted && openMap == true) await _openMapMode();
+  }
+
+  Future<void> _refreshChoices(String id) async {
+    try {
+      await context.read<AppStateController>().refreshChoices(id);
+    } catch (e) {
+      if (mounted) _showTopNotice(context, '$e');
+    }
   }
 
   void _fillInputWithChoices(List<String> choices) {

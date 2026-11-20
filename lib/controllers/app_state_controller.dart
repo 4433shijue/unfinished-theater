@@ -1,3 +1,5 @@
+import '../models/story_composer.dart';
+import '../services/choice_strategy.dart';
 import '../models/story_opening_draft.dart';
 import '../models/npc_story_state.dart';
 import '../models/turn_settlement.dart';
@@ -64,6 +66,7 @@ import '../theme/app_theme.dart';
 import '../utils/id_generator.dart';
 
 part 'story_continuity_controller.dart';
+part 'story_composer_controller.dart';
 part 'story_evolution_controller.dart';
 part 'story_rewrite_controller.dart';
 
@@ -311,6 +314,9 @@ class AppStateController extends ChangeNotifier {
   String? _lastToolResultId;
   ToolResult? _ephemeralToolResult;
   String? _lastFanficResultId;
+  bool _choicesRefreshing = false;
+  final Map<String, ComposerDraft> _unsavedComposerDrafts = {};
+  final Map<String, String> _unsavedPrivateNotes = {};
   final Map<String, StoryContinuityState> _continuityCache = {};
   StoryContinuityState? _storyContextOverride;
   bool _closingStoryScene = false;
@@ -3586,8 +3592,8 @@ ${userNote.trim().isEmpty ? '' : '用户补充：${userNote.trim()}'}
     if (!canUseTheme(resolvedThemeId)) {
       safeSettings = safeSettings.copyWith(themeId: previousThemeId);
     }
-    _settings = safeSettings;
     await _store.saveSettings(safeSettings);
+    _settings = safeSettings;
     if (previousThemeId != safeSettings.themeId) {
       var next = _gamification
           .ensureToday()
@@ -4866,6 +4872,11 @@ $instruction
     final branchHistory = DialogueHistory(
       characterId: branchId,
       messages: branchMessages
+          .map((m) => m.quote == null
+              ? m
+              : m.copyWith(
+                  quote: StoryQuote.fromJson(
+                      {...m.quote!.toJson(), 'worldId': branchId})))
           .map((m) => TurnSettlement.of(m) == null
               ? m
               : m.copyWith(gameStateSnapshot: {
@@ -4963,10 +4974,14 @@ $instruction
           characterId: branchId,
           data: storyMap(_remapStoryIds(branchContinuity.toJson(),
               {...npcIdMap, sourceCharacter.id: branchId})));
+      mappedContinuity.data['reading'] = {
+        'privateNote': {'text': await loadPrivateNote(sourceCharacter.id)}
+      };
       mappedContinuity.data['npcMigrationVersion'] = 1;
       mappedContinuity.data['npcScopeLocked'] = true;
       await _store.commitStoryWorkspace(
           state: mappedContinuity,
+          reading: mappedContinuity.reading,
           characters: _characters,
           npcProfiles: _npcProfiles,
           history: branchHistory,
@@ -5646,7 +5661,14 @@ $instruction
     notifyListeners();
   }
 
-  Future<String?> queueNpcUserMessage(String npcId, String content) async {
+  Future<String?> queueNpcUserMessage(String npcId, String content,
+      {StoryQuote? quote}) async {
+    if (quote != null &&
+        (quote.worldId != _selectedCharacterId ||
+            quote.npcId != npcId ||
+            !quoteIsCurrent(quote))) {
+      return '引用原文已变化，请重新选择或取消引用。';
+    }
     if (_storyOperationInProgress || (_isSending && !_closingStoryScene)) {
       return '请先完成当前生成或改写。';
     }
@@ -5673,12 +5695,13 @@ $instruction
       npcId: npcId,
       role: NpcMessageRole.user,
       content: trimmed,
+      quote: quote,
       timestamp: DateTime.now(),
       batchId: IdGenerator.generic('npc_user_batch'),
     );
     final nextMessages = <NpcChatMessage>[...messages, message];
-    _npcMessagesCache[npcId] = nextMessages;
     await _saveNpcWorldMessages(npcId, nextMessages);
+    _npcMessagesCache[npcId] = nextMessages;
 
     _touchNpcProfile(profile);
     await _persistNpcWorldProfiles();
@@ -6051,6 +6074,7 @@ ${target.content}
 <article class="message ${isUser ? 'user' : 'npc'}">
   <div class="bubble">
     <div class="author">$author</div>
+    ${message.quote == null ? '' : '<blockquote>${_htmlEscape(message.quote!.text)}</blockquote>'}
     <div class="content">${_htmlEscape(message.content)}</div>
     <div class="meta">$time</div>
   </div>
@@ -6625,6 +6649,14 @@ ${target.content}
         _registerCustomThemes();
         return '导入写入失败：$error。当前界面已回到导入前状态；若提交日志已写入，下次启动会继续恢复。';
       }
+      // A successful import is now authoritative for these editor surfaces.
+      // Failed imports retain the pending edits above without clearing them.
+      final importedWorldIds = importedCharacters.map((c) => c.id).toSet();
+      _unsavedPrivateNotes.removeWhere(
+          (world, _) => replaceExisting || importedWorldIds.contains(world));
+      _unsavedComposerDrafts.removeWhere((key, _) =>
+          replaceExisting ||
+          importedWorldIds.any((world) => key.startsWith('$world/')));
       await _loadCharacterState(_selectedCharacterId!);
       notifyListeners();
       return null;
@@ -7251,7 +7283,13 @@ ${target.content}
     return system;
   }
 
-  Future<String?> queueUserMessage(String content) async {
+  Future<String?> queueUserMessage(String content, {StoryQuote? quote}) async {
+    if (quote != null &&
+        (quote.worldId != _selectedCharacterId ||
+            quote.npcId != null ||
+            !quoteIsCurrent(quote))) {
+      return '引用原文已变化，请重新选择或取消引用。';
+    }
     if (pendingTurnSettlement != null) return '请先完成上一回合结算，或回退该回合。';
     final character = currentCharacter;
     final trimmed = content.trim();
@@ -7274,6 +7312,7 @@ ${target.content}
       id: IdGenerator.message(),
       role: ChatRole.user,
       content: trimmed,
+      quote: quote,
       timestamp: DateTime.now(),
       isSummarized: false,
       tokenEstimate: tokenCount,
@@ -7282,8 +7321,8 @@ ${target.content}
     final updatedHistory = currentHistory.copyWith(
       messages: <ChatMessage>[...currentHistory.messages, userMessage],
     );
-    _historyCache[character.id] = updatedHistory;
     await _store.saveDialogueHistory(updatedHistory);
+    _historyCache[character.id] = updatedHistory;
     await _updateGamification(
       (state) {
         var next = state
@@ -9759,7 +9798,7 @@ ${target.content}
           title: '灵感骰子',
           temperature: 0.72,
           instruction:
-              '根据当前剧情和用户角色状态，按 A-F 给出 6 个不同的下一步行动灵感，每项 1-2 句。A-C 采用当前可用资源稳妥推进，D-F 尝试更意外但合乎世界规则的办法。明确做什么、找谁或查哪里，需要前提时说清前提。只给建议，不保证结果，不代替用户执行，不输出 [CHOICES] 协议块。',
+              '${ChoiceStrategy.instruction}根据当前剧情和用户角色状态，按 A-F 给出六条行动灵感。只给建议，不保证结果，不代替用户执行，不输出 [CHOICES] 协议块。',
         ),
       'dream_fragment' => const _ConversationUtilitySpec(
           title: '梦境碎片',
@@ -10443,7 +10482,7 @@ ${_formatTranscript(recentMessages)}
   String _formatTranscript(Iterable<ChatMessage> messages) {
     return messages.map((message) {
       final speaker = message.role == ChatRole.user ? '用户' : 'AI';
-      return '$speaker：${MessageContentParser.contextTextForModel(message.content)}';
+      return '$speaker：${MessageContentParser.contextTextForModel(message.modelContent)}';
     }).join('\n\n');
   }
 
@@ -10680,7 +10719,8 @@ NPC 私聊历史：
 ${npcTranscript.trim().isEmpty ? '暂无。' : npcTranscript}
 
 本次用户连续发来的消息：
-${pendingMessages.map((message) => '- ${message.content}').join('\n')}
+${pendingMessages.map((message) => '- ${message.modelContent}').join('\n')}
+${_addressingPrompt(character.id, npcId: npc.id)}
 
 ${character.advancedSettings.toPrompt(groupChat: true)}
 NPC 本人的私人背景（不得让其他角色自动知情）：${jsonEncode(npc.storyState.toJson())}
@@ -10714,7 +10754,7 @@ ${StoryContinuityEngine.patchContract}
   }) {
     return messages.map((message) {
       final speaker = message.role == NpcMessageRole.user ? '用户角色' : npcName;
-      return '$speaker：${MessageContentParser.contextTextForModel(message.content)}';
+      return '$speaker：${MessageContentParser.contextTextForModel(message.modelContent)}';
     }).join('\n');
   }
 
@@ -15556,6 +15596,7 @@ JSON 格式：
 - 世界书只写长期世界规则、程序允许提供的记忆事实和关系边界，不重复整张角色卡。把规则落到人物能做什么、受什么条件限制，不堆背景名词，不恢复被记忆策略隐藏的旧事。
 - 角色 sections 写身份、当前目标、说话方式、具体行为倾向和长期互动，不复制世界书或 App 协议。新世界可以创作，人物核心事实和关系硬约束不能改；开场用一件正在发生的小事让 NPC 行动，把玩家的关键回应留给玩家。
 - 如果 outputKind 是 worldBookOnly，character 必须为 null。
+${ChoiceStrategy.instruction}
 - 如果 outputKind 是 newWorld，character 必须完整；openingMessage 包含可阅读正文、非正史互动番外、[GAME_STATE] 和 [CHOICES]。番外主题固定 backstageChat，不展示任何状态数值。
 ${InlineTheaterContract.rules}
 - 不得补写输入中没有提供的旧世界事实，不得提及“迁徙功能”“被用户带走”“旧 App 世界”。
@@ -16769,7 +16810,11 @@ ${NpcMigrationMemoryMode.label(memoryMode)}
     final mapStates = <String, dynamic>{};
 
     for (final characterId in selectedIds) {
-      continuity[characterId] = (await _ensureContinuity(characterId)).toJson();
+      await flushComposerWorkspace(characterId);
+      continuity[characterId] = {
+        ...(await _ensureContinuity(characterId)).toJson(),
+        'reading': await _store.loadStoryReading(characterId)
+      };
       histories[characterId] = (await _ensureHistory(characterId)).toJson();
       memories[characterId] = (await _ensureMemory(characterId)).toJson();
       gameStates[characterId] = (await _ensureGameState(characterId)).toJson();
@@ -17514,6 +17559,7 @@ ${NpcMigrationMemoryMode.label(memoryMode)}
             }).toList())}');
     {
       parts.add(StoryContinuityEngine.directorPrompt(continuity));
+      parts.add(_addressingPrompt(characterId));
       parts.add('【连续性事实】\n${StoryContinuityEngine.factsPrompt(continuity)}');
       parts.add(_npcKnowledgePrompt(continuity));
     }
@@ -17634,7 +17680,7 @@ ${NpcMigrationMemoryMode.label(memoryMode)}
       runtimeAddendum: runtimeAddendum,
       contextMessages: messages,
       memorySummaries: memorySummaries,
-      userContent: latestUser.content,
+      userContent: latestUser.modelContent,
       promptCacheEpoch: promptCacheEpoch,
     );
     final next = List<ChatMessage>.from(messages);
@@ -18940,7 +18986,7 @@ class _NpcMigrationCharacterPayload {
       coreLoop: '每回合围绕二人的相处、关系推进、日常事件、旧世界回声和新世界任务展开。',
       stateSystem: '长期维护时间、地点、当前任务、关系进展、回忆碎片、情绪状态、重要物品和剧情记录。',
       htmlRules: InlineTheaterContract.rules,
-      choiceRules: '每回合底部输出 3-6 个行动选项，选项必须是用户下一步可执行的行为。',
+      choiceRules: '${ChoiceStrategy.instruction}每回合底部输出六个用户下一步可执行的行动选项。',
       styleRules: '叙事采用$voice。故事主体只围绕玩家与${npc.name}展开，其他角色只能作为背景或推动关系的配角。',
       firstRoundRules: '第一回合展示抵达新世界后的场景，让用户决定如何确认关系和下一步行动，不替用户做选择。',
     );
