@@ -1,0 +1,21 @@
+<dialog id="drawer" class="drawer" aria-labelledby="drawer-title">
+  <header class="drawer-header"><div><span class="eyebrow">渡口来信 · 故事里的事</span><h2 id="drawer-title">随手记</h2></div><button class="icon-button" data-close="drawer" aria-label="关闭面板">×</button></header>
+  <div id="drawer-content" class="drawer-content"></div>
+</dialog>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<template id="composer-template">
+  <form class="composer" aria-label="写下你的行动">
+    <div class="quote-preview" hidden><span>↳</span><span class="quote-text"></span><button type="button" class="text-button" data-action="clear-quote" aria-label="取消引用">×</button></div>
+    <div class="selected-chips" aria-label="已选路线"></div>
+    <label class="sr-only" for="message">你想怎么接下去？</label>
+    <textarea id="message" rows="2" placeholder="写下你的行动，或选一条意想不到的路…"></textarea>
+    <footer class="composer-footer"><div class="composer-tools"><button type="button" class="text-button" data-panel="tools">✧ 灵感</button><button type="button" class="text-button" data-panel="notes">📝 手记</button><button type="button" class="text-button" data-panel="people">人物</button></div><button type="submit" class="skin-button send-button"><span>接着写 ↗</span></button></footer>
+  </form>
+</template>
+<template id="choice-template">
+  <section class="choices" aria-labelledby="choices-title">
+    <header class="choices-heading"><div><span class="eyebrow">接下来，故事由你</span><h2 id="choices-title">六种可能</h2></div><button class="text-button" data-action="reroll">换一组 ↻</button></header>
+    <div class="choice-grid"></div>
+    <p class="choice-hint"><span class="selection-count" aria-live="polite">可多选，也可以自己写</span><span>循常 → 出其不意</span></p>
+  </section>
+</template>

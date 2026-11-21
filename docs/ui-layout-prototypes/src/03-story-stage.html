@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="dark light"><title>03 舞台剧场 · 未完剧场布局原型</title><!-- STYLES --></head>
+<body class="stage" data-layout="stage" data-skin="vinyl_memories">
+<header class="app-header"><div class="brand"><span class="brand-mark" aria-hidden="true">未</span>未完剧场</div><div class="header-center"><b>03</b><span>舞台剧场 · 布局原型</span></div><div class="header-actions"><button class="text-button" data-panel="about">原型说明</button><select class="skin-picker" aria-label="切换现有皮肤"><option value="rain_radio">雨巷电台</option><option value="flower_not_flower">花非花</option><option value="vinyl_memories">黑胶往事</option></select></div></header>
+<main class="stage-layout">
+  <section class="stage-scenery" aria-label="这一幕的场景"><div class="stage-heading"><div class="scene-kicker">渡口来信 / 第七幕</div><h1>雨停之前，<br>别让这封信抵岸。</h1><p class="stage-tagline">末班船还有一盏灯，亮着等你。</p></div><div class="cast-rail"><span class="cast-label">此刻在场</span><button class="cast-button" data-person="阿澈"><span class="avatar">澈</span><span>阿澈</span></button><button class="cast-button" data-panel="map"><span class="avatar">⌁</span><span>港口</span></button><button class="cast-button" data-panel="chapters"><span class="avatar">☷</span><span>幕间</span></button></div></section>
+  <section class="stage-dock" aria-label="对白与回应">
+    <div class="dialogue-panel"><div class="stage-dialogue-label"><span>灯光停在了你们之间</span><span>SCENE 07</span></div><div class="speaker"><span class="avatar" id="speaker-avatar">叙</span><div><span class="speaker-name" id="speaker-name">旁白</span><small id="speaker-note">夜雨 / 港口</small></div></div><div class="stage-line" id="stage-line" aria-live="polite"></div><div class="dialogue-pagination"><div class="page-dots" aria-label="对白段落"></div><div class="dialogue-steps"><span id="page-counter" class="small-label">1 / 3</span><button data-action="prev-page" aria-label="上一段对白">←</button><button data-action="next-page" aria-label="下一段对白">→</button></div></div><div class="stage-reading-tools"><button class="text-button" data-action="quote">↳ 引用这一段</button><button class="text-button" data-panel="fullstory">完整阅读</button><button class="text-button" data-panel="notes">📝 留个念头</button></div></div>
+    <div id="desktop-response"><div class="stage-response"><div data-mount="choices"></div><div data-mount="composer"></div></div></div>
+    <button class="open-routes" data-action="open-routes"><span>让故事，往另一个方向走<small>六条路线 / 也可以自由写</small></span><span class="route-arrow">↗</span></button>
+  </section>
+  <footer class="stage-footer"><span>本地原型 · 不接 AI · 翻过对白，选择你的下一幕</span><span>THE NEXT SCENE IS YOURS</span></footer>
+</main>
+<dialog id="route-dialog" class="route-dialog" aria-labelledby="route-dialog-title"><div class="route-dialog-header"><span id="route-dialog-title">这一幕，接下来由你</span><button class="icon-button" data-close="route-dialog" aria-label="收起路线">×</button></div><div id="mobile-response"></div></dialog>
+<!-- SHARED --><!-- SCRIPT -->
+</body></html>
