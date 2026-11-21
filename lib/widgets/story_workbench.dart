@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import '../controllers/app_state_controller.dart';
 import '../models/story_continuity.dart';
 import '../services/message_content_parser.dart';
+import '../services/story_rewrite_service.dart';
+import '../services/story_markdown_document.dart';
 
 Future<void> _storyNotice(
     BuildContext context, Future<void> Function() action) async {
@@ -94,26 +96,14 @@ class _StoryRewriteDialogState extends State<_StoryRewriteDialog> {
     target = targets.firstOrNull;
     final selected = widget.selection?.trim() ?? '';
     if (selected.isNotEmpty) {
-      final matches = <StoryRewriteTarget>[];
-      for (final paragraph in targets) {
-        var offset = paragraph.selectedText.indexOf(selected);
-        while (offset >= 0) {
-          final start = paragraph.start + offset;
-          matches.add(StoryRewriteTarget(
-              messageId: paragraph.messageId,
-              content: paragraph.content,
-              start: start,
-              end: start + selected.length,
-              npcId: paragraph.npcId,
-              groupIndex: paragraph.groupIndex));
-          offset = paragraph.selectedText
-              .indexOf(selected, offset + selected.length);
-        }
-      }
+      final matches = StoryRewriteService.selectedTargets(targets, selected);
       if (matches.isNotEmpty) {
         targets = matches;
         ambiguousSelection = matches.length > 1;
         target = ambiguousSelection ? null : matches.single;
+      } else {
+        target = null;
+        error = '无法可靠定位选中文字，请在下方明确选择原文段落。';
       }
     }
   }
@@ -235,7 +225,9 @@ class _StoryRewriteDialogState extends State<_StoryRewriteDialog> {
                       if (target != null) ...[
                         const SizedBox(height: 12),
                         const Text('选中原文'),
-                        SelectableText(target!.selectedText)
+                        SelectableText(StoryMarkdownDocument.projection(
+                                target!.selectedText)
+                            .text)
                       ],
                       if (preview != null) ...[
                         const Divider(),

@@ -1,4 +1,5 @@
 import 'story_continuity_engine.dart';
+import 'narrative_contract.dart';
 import 'message_content_parser.dart';
 import 'dart:convert';
 
@@ -22,6 +23,7 @@ class TurnStateAdjudicator {
     return '''
 结算文字游戏本轮已经发生的状态变化。依据只有玩家行动、上一轮已保存状态与本轮剧情正文；不续写剧情，不补全人物未表露的动机或尚未发生的结果。
 先分清提议、打算、尝试和已完成的行动。没有明确结果时沿用原状态，不把猜测写成事实，也不因修辞或气氛变化随意增减数值。
+${NarrativeContract.adjudication}
 
 只输出一个完整 JSON 对象，不要 Markdown 围栏、解释或额外文字：
 {

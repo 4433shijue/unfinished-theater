@@ -9,7 +9,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'story_markdown.dart';
 
 import '../models/bubble_style.dart';
 import '../models/chat_message.dart';
@@ -22,6 +22,14 @@ import 'gameplay_turn_feedback.dart';
 import 'runnable_code_preview.dart';
 
 class ChatMessageBubble extends StatefulWidget {
+  static List<Color> assistantBackgrounds(
+          String frameId, BubbleStyleSpec? custom) =>
+      (_CosmeticBubbleStyle.forFrame(frameId,
+                      isUser: false, selected: false, customStyle: custom)
+                  .gradient ??
+              AppTheme.defaultAssistantBubbleGradient)
+          .colors;
+
   const ChatMessageBubble({
     super.key,
     required this.message,
@@ -521,12 +529,11 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
         final textColor = AppTheme.assistantBubbleTextColor;
         final effectiveTextColor =
             widget.customBubbleStyle?.textFor(false) ?? textColor;
-        final codeBackground = AppTheme.isLightPaletteMode
-            ? AppTheme.activePrimary.withValues(alpha: 0.08)
-            : Colors.white.withValues(alpha: 0.08);
-        final codeBlockBackground = AppTheme.isLightPaletteMode
-            ? Colors.white.withValues(alpha: 0.70)
-            : Colors.black.withValues(alpha: 0.16);
+        final bubbleStyle = _CosmeticBubbleStyle.forFrame(
+            widget.equippedFrameId,
+            isUser: false,
+            selected: false,
+            customStyle: widget.customBubbleStyle);
         return _assistantTextBubble(
           child: SelectionArea(
             onSelectionChanged: (value) =>
@@ -551,38 +558,16 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
                           widget.onRewrite!(_storySelectedText);
                         })
                 ]),
-            child: MarkdownBody(
+            child: StoryMarkdown(
               data: block.content,
-              selectable: false,
-              softLineBreak: true,
-              onTapLink: (_, __, ___) {},
-              styleSheet:
-                  MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-                p: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: effectiveTextColor,
-                      height: 1.62,
-                    ),
-                h1: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      color: effectiveTextColor,
-                    ),
-                h2: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: effectiveTextColor,
-                    ),
-                h3: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: effectiveTextColor,
-                    ),
-                code: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontFamily: 'monospace',
-                      color: effectiveTextColor,
-                      backgroundColor: codeBackground,
-                    ),
-                codeblockPadding: const EdgeInsets.all(12),
-                codeblockDecoration: BoxDecoration(
-                  color: codeBlockBackground,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                blockSpacing: 12,
-              ),
+              isStreaming: widget.isStreaming,
+              backgrounds: (bubbleStyle.gradient ??
+                      AppTheme.defaultAssistantBubbleGradient)
+                  .colors,
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: effectiveTextColor,
+                    height: 1.62,
+                  ),
             ),
           ),
         );
@@ -2735,8 +2720,9 @@ class _GroupChatBubble extends StatelessWidget {
                                     onRewrite!();
                                   })
                           ]),
-                      child: Text(
-                        message.content,
+                      child: StoryMarkdown(
+                        data: message.content,
+                        backgrounds: [fill],
                         style: theme.textTheme.bodyLarge?.copyWith(
                           color: textColor,
                           height: narration ? 1.62 : 1.5,

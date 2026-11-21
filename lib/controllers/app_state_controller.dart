@@ -1,5 +1,6 @@
 import '../models/story_composer.dart';
 import '../services/choice_strategy.dart';
+import '../services/narrative_contract.dart';
 import '../models/story_opening_draft.dart';
 import '../models/npc_story_state.dart';
 import '../models/turn_settlement.dart';
@@ -8288,8 +8289,6 @@ ${choices.trim().isEmpty ? '暂无。' : choices}
         originalResult: resultText,
         originalPrompt: userPrompt,
         allowLocationReset: false,
-        minimumNarrativeChineseCharacters:
-            character.advancedSettings.minimumCharacters,
       );
       final nextMapState = _mergeRulesMapNarrative(
         characterId: character.id,
@@ -9578,6 +9577,8 @@ title, stage, mainGoal, locations, edges, spawnCandidates, mapInventory, quests,
       final result = await _apiClient.runUtilityTask(
         settings: _settings,
         systemPrompt: _utilitySystemPrompt +
+            NarrativeContract.agency +
+            NarrativeContract.presentation +
             (replaceOriginal && character.requiresHtmlPanel
                 ? InlineTheaterContract.prompt(
                     character.inlineTheaterSettings, themeId)
@@ -9586,6 +9587,8 @@ title, stage, mainGoal, locations, edges, spawnCandidates, mapInventory, quests,
 任务：$title
 
 $instruction
+
+${NarrativeContract.turnAuthorization(history.messages.take(targetIndex).toList())}
 
 当前 AI 角色：${character.name}
 角色可见简介：
@@ -10720,6 +10723,7 @@ ${npcTranscript.trim().isEmpty ? '暂无。' : npcTranscript}
 
 本次用户连续发来的消息：
 ${pendingMessages.map((message) => '- ${message.modelContent}').join('\n')}
+${NarrativeContract.authorization(pendingMessages.map((message) => message.content))}
 ${_addressingPrompt(character.id, npcId: npc.id)}
 
 ${character.advancedSettings.toPrompt(groupChat: true)}
@@ -10822,9 +10826,10 @@ ${StoryContinuityEngine.patchContract}
     }
 
     if (rawItems.length == 1) {
+      final onlyMessage = rawItems.single;
       rawItems
         ..clear()
-        ..addAll(_splitNpcBubbleText(source.first));
+        ..addAll(_splitNpcBubbleText(onlyMessage));
     }
 
     if (rawItems.length > 5) {
@@ -10837,6 +10842,12 @@ ${StoryContinuityEngine.patchContract}
   }
 
   List<String> _splitNpcBubbleText(String value) {
+    // The provider's explicit message boundaries keep Markdown and dialogue
+    // delimiters together. Sentence splitting could orphan a closing quote or
+    // a formatting marker in a different bubble.
+    if (RegExp(r'["“”「」『』*_`#>\[\]]').hasMatch(value)) {
+      return <String>[value.trim()];
+    }
     final normalized = value
         .replaceAll('\r\n', '\n')
         .split(RegExp(r'\n{2,}|\n|(?<=[。！？!?])'))
@@ -10844,7 +10855,7 @@ ${StoryContinuityEngine.patchContract}
         .where(NpcMessageClassifier.isDeliverableChatBubble)
         .toList(growable: false);
     if (normalized.length >= 2) {
-      return normalized.take(5).toList(growable: false);
+      return normalized;
     }
     return <String>[value.trim()];
   }
@@ -11316,9 +11327,11 @@ affinity 是 NPC 对用户角色的好感度，范围 -100 到 100；已有明�
 ''';
 
   static const String _npcChatSystemPrompt = '''
+${NarrativeContract.agency}
+${NarrativeContract.presentation}
 你是文字游戏 App 的 NPC 私聊引擎。你只扮演指定 NPC 和用户角色进行手机聊天，不推进主线回合，不改变考试、时间线、重大事件和世界设定。
 
-你必须只输出一个 JSON 对象，不要使用 Markdown，不要解释。
+你必须只输出一个 JSON 对象，不用 Markdown 围栏包裹 JSON，不要解释；messages 内允许少量 Markdown 强调，保持手机聊天语气。
 JSON 格式：
 {
   "messages": ["NPC 第1个气泡", "NPC 第2个气泡"],
@@ -12596,6 +12609,8 @@ $events
   }
 
   static const String _mapSystemPrompt = '''
+${NarrativeContract.agency}
+${NarrativeContract.presentation}
 你是一个“地图主线模式”引擎，负责把文字游戏世界转换成可点击、可推进、可长期保存的互动地图。
 
 核心原则：
@@ -12688,6 +12703,8 @@ NPC更新：npcId：稳定ID｜名字：NPC名字｜简介：身份与关系｜�
 ''';
 
   static const String _mapRepairSystemPrompt = '''
+${NarrativeContract.agency}
+${NarrativeContract.presentation}
 你是地图模式格式修复器，只修格式，不润色或补写剧情。以原任务及本地权威状态为准，保留 ID、数值、数组顺序和既有状态变化；未知事实不填成确定结论，修复建议行动不代表执行行动。
 必须输出完整修复后的回复：用户可读正文、按设置启用的互动番外 HTML、[GAME_STATE]、原任务要求的 [THEATER_PATCH]、[MAP_STATE]。
 不要解释修复过程，不要输出 Markdown 代码块包裹 JSON，不要新增或改名已锁定大地点。

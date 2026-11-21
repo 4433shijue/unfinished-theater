@@ -1,3 +1,4 @@
+import '../services/story_markdown_document.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -465,8 +466,13 @@ Future<StoryQuote?> selectStoryQuote(
                         child: Column(mainAxisSize: MainAxisSize.min, children: [
                       for (final t in targets)
                         ListTile(
-                            title: Text(t.selectedText),
-                            onTap: () => Navigator.pop(context, t.selectedText))
+                            title: Text(
+                                StoryMarkdownDocument.projection(t.selectedText)
+                                    .text),
+                            onTap: () => Navigator.pop(
+                                context,
+                                StoryMarkdownDocument.projection(t.selectedText)
+                                    .text))
                     ]))),
                 actions: [
                   TextButton(
@@ -486,7 +492,7 @@ Future<void> showQuoteSource(BuildContext context, StoryQuote quote) {
   final paragraphs = raw == null
       ? <String>[]
       : StoryRewriteService.targets(quote.messageId, raw, npcId: quote.npcId)
-          .map((t) => t.selectedText)
+          .map((t) => StoryMarkdownDocument.projection(t.selectedText).text)
           .toList();
   final matched = paragraphs.where((p) => p.contains(quote.text)).firstOrNull;
   return showDialog<void>(

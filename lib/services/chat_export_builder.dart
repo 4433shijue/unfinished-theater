@@ -1,6 +1,7 @@
 import 'dart:convert';
 
-import 'package:markdown/markdown.dart' as markdown;
+import '../theme/story_text_palette.dart';
+import 'story_markdown_document.dart';
 
 import '../models/chat_message.dart';
 import 'message_content_parser.dart';
@@ -12,7 +13,9 @@ class ChatExportBuilder {
     required String title,
     required String assistantName,
     required List<ChatMessage> messages,
+    StoryTextPalette? textPalette,
   }) {
+    final colors = (textPalette ?? StoryTextPalette.resolve()).css;
     final escapedTitle = const HtmlEscape().convert(title);
     final escapedAssistantName = const HtmlEscape().convert(assistantName);
     final messageHtml = messages.map((message) {
@@ -39,6 +42,12 @@ class ChatExportBuilder {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>$escapedTitle</title>
   <style>
+    .content .story-dialogue { color: ${colors['dialogue']}; }
+    .content strong { color: ${colors['emphasis']}; font-size: 1.08em; }
+    .content em { color: ${colors['muted']}; font-size: .95em; }
+    .content h1 { font-size: 1.25em; }
+    .content h2 { font-size: 1.2em; }
+    .content h3, .content h4, .content h5, .content h6 { font-size: 1.15em; }
     :root {
       --bg: linear-gradient(135deg, #fff8ef 0%, #f0f4ff 52%, #eefcff 100%);
       --card: rgba(255, 255, 255, 0.9);
@@ -47,7 +56,7 @@ class ChatExportBuilder {
       --border: rgba(15, 23, 42, 0.08);
       --primary: #0d7c78;
       --primary-soft: #a9ece4;
-      --assistant: #ffffff;
+      --assistant: ${colors['surface']};
       --shadow: 0 18px 40px rgba(15, 23, 42, 0.09);
     }
 
@@ -105,6 +114,10 @@ class ChatExportBuilder {
     .message.assistant {
       justify-content: flex-start;
     }
+
+    .message.assistant .bubble { color: ${colors['text']}; }
+    .message.assistant .author { color: ${colors['dialogue']}; }
+    .message.assistant .meta { color: ${colors['muted']}; }
 
     .bubble {
       width: min(760px, 82vw);
@@ -242,7 +255,7 @@ class ChatExportBuilder {
     final htmlBlocks = blocks.map((block) {
       switch (block.type) {
         case MessageContentBlockType.markdown:
-          return '<div class="message-block">${markdown.markdownToHtml(block.content)}</div>';
+          return '<div class="message-block">${StoryMarkdownDocument.toHtml(block.content)}</div>';
         case MessageContentBlockType.code:
           final title =
               block.language.trim().isEmpty ? 'code' : block.language.trim();
@@ -271,11 +284,16 @@ class ChatExportBuilder {
       }
     }).join();
 
-    final choices = MessageContentParser.parseStructured(content).choices;
+    final structured = MessageContentParser.parseStructured(content);
+    final group = structured.groupChatMessages
+        .map((m) =>
+            '<section class="message-block"><b>${const HtmlEscape().convert(m.speaker)}</b>${StoryMarkdownDocument.toHtml(m.content)}</section>')
+        .join();
+    final choices = structured.choices;
     final options = choices.isEmpty
         ? ''
         : '<ol type="A">${choices.map((c) => '<li>${const HtmlEscape().convert(c.label)}</li>').join()}</ol>';
-    return '$htmlBlocks$options';
+    return '$htmlBlocks$group$options';
   }
 
   static String _formatTimestamp(DateTime value) {

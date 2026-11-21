@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'story_markdown.dart';
 
 import '../services/message_content_parser.dart';
 import '../theme/app_theme.dart';
@@ -50,29 +50,10 @@ class HtmlContentView extends StatelessWidget {
     switch (block.type) {
       case MessageContentBlockType.markdown:
         return SelectionArea(
-          child: MarkdownBody(
+          child: StoryMarkdown(
             data: block.content,
-            selectable: false,
-            softLineBreak: true,
-            onTapLink: (_, __, ___) {},
-            styleSheet:
-                MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-              p: style,
-              code: style?.copyWith(
-                fontFamily: 'monospace',
-                backgroundColor:
-                    Theme.of(context).colorScheme.surfaceContainerHighest,
-              ),
-              codeblockPadding: const EdgeInsets.all(12),
-              codeblockDecoration: BoxDecoration(
-                color: Theme.of(context)
-                    .colorScheme
-                    .surfaceContainerHighest
-                    .withValues(alpha: 0.72),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              blockSpacing: 12,
-            ),
+            style: style,
+            isStreaming: isStreaming,
           ),
         );
       case MessageContentBlockType.code:

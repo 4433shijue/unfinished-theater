@@ -1,3 +1,5 @@
+import '../services/story_markdown_document.dart';
+import '../theme/story_text_palette.dart';
 import '../models/story_composer.dart';
 import '../widgets/story_composer.dart';
 import '../widgets/turn_settlement_dialog.dart';
@@ -1493,7 +1495,13 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _copyMessage(ChatMessage message) async {
-    await Clipboard.setData(ClipboardData(text: message.content));
+    await Clipboard.setData(ClipboardData(
+        text: message.role == ChatRole.user
+            ? message.content
+            : StoryMarkdownDocument.projection(
+                    MessageContentParser.contextTextForModel(
+                        message.displayContent))
+                .text));
     if (!mounted) {
       return;
     }
@@ -2508,10 +2516,17 @@ ${choice.index}. ${choice.label}
 
     final title =
         '${character.name} 对话记录 ${DateTime.now().toLocal().toIso8601String().replaceAll(':', '-')}';
+    final controller = context.read<AppStateController>();
     final html = ChatExportBuilder.buildHtml(
       title: title,
       assistantName: character.name,
       messages: messages,
+      textPalette: StoryTextPalette.resolve(
+          backgrounds: ChatMessageBubble.assistantBackgrounds(
+              controller.currentBubbleFrameId,
+              BubbleStyleSpec.fromCustom(
+                  controller.gamification.customBubbleStyles,
+                  controller.currentBubbleFrameId))),
     );
 
     final downloaded = await downloadTextFile(

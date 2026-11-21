@@ -29,6 +29,31 @@ class ReleaseNotes {
 }
 
 const ReleaseNotes currentReleaseNotes = ReleaseNotes(
+  id: 'v3.0.0',
+  version: 'V3.0.0',
+  title: 'V3.0.0 下一步，由你决定',
+  subtitle: '熟悉的界面，更清楚的叙事边界与正文层次。',
+  items: [
+    ReleaseNoteItem(
+        icon: Icons.touch_app_outlined,
+        title: '决定权留给你',
+        description: '续写围绕已经提交的行动展开，在下一次需要你回应的位置停下；篇幅通过 NPC 与场景反应展开。'),
+    ReleaseNoteItem(
+        icon: Icons.format_color_text,
+        title: '对白跟随皮肤',
+        description: '引号里的话自动使用同色系主题色：浅底用深色，深底用浅色，并适配当前气泡底色。'),
+    ReleaseNoteItem(
+        icon: Icons.text_fields,
+        title: '文字也有轻重',
+        description: '正文按场景使用 Markdown 强调、轻声、信件引用与小标题；复制、引用和改写继续保留。'),
+    ReleaseNoteItem(
+        icon: Icons.palette_outlined,
+        title: '熟悉的布局继续用',
+        description: '保留原有页面、皮肤、贴图与六条不同路线；主线、人物私聊与群聊统一文字表现。'),
+  ],
+);
+
+const ReleaseNotes _v2160ReleaseNotes = ReleaseNotes(
   id: 'v2.16.0',
   version: 'V2.16.0',
   title: 'V2.16.0 接住这句话，走一条意想不到的路',
@@ -1872,6 +1897,7 @@ const ReleaseNotes _v210ReleaseNotes = ReleaseNotes(
 
 const List<ReleaseNotes> releaseNotesHistory = <ReleaseNotes>[
   currentReleaseNotes,
+  _v2160ReleaseNotes,
   _v2150ReleaseNotes,
   _v2140ReleaseNotes,
   _v2131ReleaseNotes,

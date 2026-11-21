@@ -1,9 +1,12 @@
 import 'dart:convert';
+import '../services/narrative_contract.dart';
 import 'gameplay_system_prompt.dart';
 import '../models/simulator_prompt_request.dart';
 
 const String simulatorPromptGeneratorSystemPrompt = '''
 根据用户的灵感，为文字游戏编写能长期使用的设定与运行规则。本次交付的是角色提示词，实际剧情由另一个 AI 在游玩时展开。
+${NarrativeContract.opening}
+${NarrativeContract.presentation}
 
 只输出一个 JSON 对象，不要 Markdown 代码围栏，不要解释：
 {

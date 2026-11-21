@@ -1,9 +1,25 @@
 import 'narrative_content.dart';
+import 'story_markdown_document.dart';
 import 'dart:convert';
 import '../models/story_continuity.dart';
 
 class StoryRewriteService {
   const StoryRewriteService._();
+  static List<StoryRewriteTarget> selectedTargets(
+          List<StoryRewriteTarget> paragraphs, String selected) =>
+      [
+        for (final paragraph in paragraphs)
+          for (final range
+              in StoryMarkdownDocument.projection(paragraph.selectedText)
+                  .occurrences(selected))
+            StoryRewriteTarget(
+                messageId: paragraph.messageId,
+                content: paragraph.content,
+                start: paragraph.start + range.start,
+                end: paragraph.start + range.end,
+                groupIndex: paragraph.groupIndex,
+                npcId: paragraph.npcId),
+      ];
   static List<StoryRewriteTarget> targets(String messageId, String raw,
       {String? npcId}) {
     final masked = NarrativeContent.maskHtmlForSelection(raw);
@@ -77,7 +93,13 @@ class StoryRewriteService {
     }
     if (target.groupIndex == null) {
       if (raw != target.content) throw StateError('原文已变化，请重新选择。');
-      return raw.replaceRange(target.start, target.end, replacement);
+      return raw.replaceRange(
+          target.start,
+          target.end,
+          replacement == target.selectedText
+              ? replacement
+              : StoryMarkdownDocument.projection(raw)
+                  .balancedReplacement(target.start, target.end, replacement));
     }
     final group = RegExp(r'\[GROUP_CHAT\]\s*([\s\S]*?)\s*\[/GROUP_CHAT\]',
             caseSensitive: false)
@@ -90,8 +112,13 @@ class StoryRewriteService {
     }
     final row = storyMap(rows[target.groupIndex!]);
     if (row['content'] != target.content) throw StateError('原文已变化，请重新选择。');
-    row['content'] =
-        target.content.replaceRange(target.start, target.end, replacement);
+    row['content'] = target.content.replaceRange(
+        target.start,
+        target.end,
+        replacement == target.selectedText
+            ? replacement
+            : StoryMarkdownDocument.projection(target.content)
+                .balancedReplacement(target.start, target.end, replacement));
     rows[target.groupIndex!] = row;
     return raw.replaceRange(group.start, group.end,
         '[GROUP_CHAT]\n${jsonEncode(decoded)}\n[/GROUP_CHAT]');

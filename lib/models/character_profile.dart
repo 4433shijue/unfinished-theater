@@ -1,4 +1,5 @@
 import '../services/choice_strategy.dart';
+import '../services/narrative_contract.dart';
 import 'inline_theater_settings.dart';
 import '../services/inline_theater_contract.dart';
 import 'model_params.dart';
@@ -177,7 +178,9 @@ class CharacterProfile {
 
     final buffer = StringBuffer()
       ..writeln('【本角色运行开关｜格式完成优先】')
-      ..writeln('一次正式剧情回复必须同时满足正文长度和当前模式的结构要求；具体需要哪些标签与资料卡，以本节的模式和开关为准。');
+      ..writeln('一次正式剧情回复必须满足玩家决定权和当前模式的结构要求；篇幅服从本轮行动边界，具体标签与资料卡以本节开关为准。')
+      ..writeln(NarrativeContract.agency)
+      ..writeln(NarrativeContract.presentation);
 
     buffer.writeln(
       '如果角色设定要求长篇叙事，HTML/CSS/JS、[GAME_STATE] 和 [CHOICES] 都不能替代正文；正文完成后仍必须继续输出 App 所需结构。',
@@ -293,10 +296,14 @@ class CharacterProfile {
 5. ${nextStepOptionsEnabled ? '只输出 A-C 三个上下文相关行动，不输出 D-F；其中一项应允许自由探索、换条路线或返回导览。' : '当前关闭下一步选项，不输出 [CHOICES] 或 A-F 建议行动，仍须维护 [GAME_STATE]。'}
 6. 正文 -> [GAME_STATE]${nextStepOptionsEnabled ? ' -> [CHOICES]' : ''}。内部结构必须完整闭合。
 7. 不替玩家决定关键行动、台词或内心结论。
+${NarrativeContract.agency}
+${NarrativeContract.presentation}
 ''';
 
   String get _largeGroupChatRuntimePrompt {
     final buffer = StringBuffer()
+      ..writeln(NarrativeContract.agency)
+      ..writeln(NarrativeContract.presentation)
       ..writeln('【大型群聊模式，最高优先级】')
       ..writeln('当前角色启用了不可逆大型群聊模式。这是独立主线模式，不是普通文游的分段输出，也不是 HTML 美化框。')
       ..writeln(

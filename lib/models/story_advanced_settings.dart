@@ -40,7 +40,7 @@ class StoryAdvancedSettings {
         _ => '2200-3200'
       };
   String get lengthInstruction =>
-      '纯文字剧情正文目标 $lengthTarget 个中文字符，下限 $minimumCharacters 字；HTML、状态块和选项不计入正文长度，资料卡与代码同样不计入。';
+      '纯文字剧情正文目标 $lengthTarget 个中文字符；HTML、状态块和选项不计入正文长度，资料卡与代码同样不计入。篇幅是场景展开目标，玩家决定权优先；到达需要玩家再次决定的位置立即停下，允许少于目标字数，不能为补足长度替玩家行动。';
   Map<String, dynamic> toJson() => {
         'perspective': perspective,
         'length': length,

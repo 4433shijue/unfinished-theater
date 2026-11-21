@@ -76,8 +76,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(
         find.byKey(const ValueKey('source-message-reply-12')), findsOneWidget);
-    expect(find.textContaining('第12次走访，证人收起了伞。'), findsWidgets);
-    expect(find.textContaining('秘密门牌'), findsNothing);
+    expect(find.textContaining('第12次走访，证人收起了伞。', findRichText: true),
+        findsWidgets);
+    expect(find.textContaining('秘密门牌', findRichText: true), findsNothing);
     await tester.tap(find.text('上一回合'));
     await tester.pumpAndSettle();
     expect(

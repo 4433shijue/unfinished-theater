@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../models/chat_message.dart';
 import '../theme/app_theme.dart';
+import '../theme/story_text_palette.dart';
+import 'story_markdown_document.dart';
 import 'message_content_parser.dart';
 
 class StoryShareCardBuilder {
@@ -19,6 +21,12 @@ class StoryShareCardBuilder {
     final escapedTitle = const HtmlEscape().convert(title);
     final escapedAssistantName = const HtmlEscape().convert(assistantName);
     final theme = _ShareTheme.fromPalette(palette);
+    final colors = StoryTextPalette.resolve(
+            primary: palette.primary,
+            body: const Color(0xFF263238),
+            backgrounds: [Colors.white],
+            underlay: Colors.white)
+        .css;
     final selected = _selectMessages(messages);
     final lead = selected.isEmpty
         ? '这张剧情卡还没有内容。'
@@ -47,6 +55,12 @@ class StoryShareCardBuilder {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>$escapedTitle</title>
   <style>
+    .content .story-dialogue { color: ${colors['dialogue']}; }
+    .content strong { color: ${colors['emphasis']}; font-size: 1.08em; }
+    .content em { color: ${colors['muted']}; font-size: .95em; }
+    .content h1 { font-size: 1.25em; }
+    .content h2 { font-size: 1.2em; }
+    .content h3, .content h4, .content h5, .content h6 { font-size: 1.15em; }
     :root {
       --bg-1: ${theme.bg1};
       --bg-2: ${theme.bg2};
@@ -322,8 +336,12 @@ class StoryShareCardBuilder {
     final parts = <String>[];
     for (final block in parsed.blocks) {
       if (block.type == MessageContentBlockType.markdown) {
-        parts.add(_paragraphs(_plainText(block.content, limit: 1600)));
+        parts.add(StoryMarkdownDocument.toHtml(block.content));
       }
+    }
+    for (final speech in parsed.groupChatMessages) {
+      parts.add(
+          '<section><b>${const HtmlEscape().convert(speech.speaker)}</b>${StoryMarkdownDocument.toHtml(speech.content)}</section>');
     }
     if (parsed.choices.isNotEmpty) {
       final choices = parsed.choices.map((choice) {
@@ -349,7 +367,8 @@ class StoryShareCardBuilder {
   }
 
   static String _plainText(String value, {required int limit}) {
-    final cleaned = value
+    final cleaned = StoryMarkdownDocument.projection(value)
+        .text
         .replaceAll(RegExp(r'```[\s\S]*?```'), ' ')
         .replaceAll(RegExp(r'\[[A-Z_]+\][\s\S]*?\[/[A-Z_]+\]'), ' ')
         .replaceAll(RegExp(r'<[^>]+>'), ' ')

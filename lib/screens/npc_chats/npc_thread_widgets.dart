@@ -1,5 +1,51 @@
 part of '../npc_chats_screen.dart';
 
+class _NpcStoryContent extends StatefulWidget {
+  const _NpcStoryContent(
+      {required this.content,
+      this.style,
+      required this.backgrounds,
+      this.onQuote,
+      this.onRewrite});
+  final String content;
+  final TextStyle? style;
+  final List<Color> backgrounds;
+  final ValueChanged<String>? onQuote, onRewrite;
+  @override
+  State<_NpcStoryContent> createState() => _NpcStoryContentState();
+}
+
+class _NpcStoryContentState extends State<_NpcStoryContent> {
+  String _selection = '';
+  @override
+  Widget build(BuildContext context) => SelectionArea(
+      onSelectionChanged: (value) => _selection = value?.plainText ?? '',
+      contextMenuBuilder: (context, region) =>
+          AdaptiveTextSelectionToolbar.buttonItems(
+              anchors: region.contextMenuAnchors,
+              buttonItems: [
+                ...region.contextMenuButtonItems,
+                if (widget.onQuote != null)
+                  ContextMenuButtonItem(
+                      label: '接这句',
+                      onPressed: () {
+                        region.hideToolbar();
+                        widget.onQuote!(_selection);
+                      }),
+                if (widget.onRewrite != null)
+                  ContextMenuButtonItem(
+                      label: '局部改写',
+                      onPressed: () {
+                        region.hideToolbar();
+                        widget.onRewrite!(_selection);
+                      }),
+              ]),
+      child: StoryMarkdown(
+          data: widget.content,
+          style: widget.style,
+          backgrounds: widget.backgrounds));
+}
+
 class _NpcMessageBubble extends StatelessWidget {
   const _NpcMessageBubble({
     required this.message,
@@ -95,40 +141,53 @@ class _NpcMessageBubble extends StatelessWidget {
                                 showQuoteSource(context, message.quote!),
                             label: Text(message.quote!.text,
                                 maxLines: 2, overflow: TextOverflow.ellipsis)),
-                      SelectableText(
-                        message.content,
-                        contextMenuBuilder: (context, editable) =>
-                            AdaptiveTextSelectionToolbar.buttonItems(
-                                anchors: editable.contextMenuAnchors,
-                                buttonItems: [
-                              ...editable.contextMenuButtonItems,
-                              if (onQuote != null)
-                                ContextMenuButtonItem(
-                                    label: '接这句',
-                                    onPressed: () {
-                                      final text = editable
-                                          .textEditingValue.selection
-                                          .textInside(message.content);
-                                      editable.hideToolbar();
-                                      onQuote!(text);
-                                    }),
-                              if (onRewrite != null)
-                                ContextMenuButtonItem(
-                                    label: '局部改写',
-                                    onPressed: () {
-                                      final selection =
-                                          editable.textEditingValue.selection;
-                                      final text =
-                                          selection.textInside(message.content);
-                                      editable.hideToolbar();
-                                      onRewrite!(text);
-                                    })
-                            ]),
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodyMedium
-                            ?.copyWith(color: textColor, height: 1.5),
-                      ),
+                      if (!isUser)
+                        _NpcStoryContent(
+                          content: message.content,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(color: textColor, height: 1.5),
+                          backgrounds: bubbleDecoration.gradient?.colors ??
+                              [bubbleDecoration.color ?? AppTheme.panel],
+                          onQuote: onQuote,
+                          onRewrite: onRewrite,
+                        )
+                      else
+                        SelectableText(
+                          message.content,
+                          contextMenuBuilder: (context, editable) =>
+                              AdaptiveTextSelectionToolbar.buttonItems(
+                                  anchors: editable.contextMenuAnchors,
+                                  buttonItems: [
+                                ...editable.contextMenuButtonItems,
+                                if (onQuote != null)
+                                  ContextMenuButtonItem(
+                                      label: '接这句',
+                                      onPressed: () {
+                                        final text = editable
+                                            .textEditingValue.selection
+                                            .textInside(message.content);
+                                        editable.hideToolbar();
+                                        onQuote!(text);
+                                      }),
+                                if (onRewrite != null)
+                                  ContextMenuButtonItem(
+                                      label: '局部改写',
+                                      onPressed: () {
+                                        final selection =
+                                            editable.textEditingValue.selection;
+                                        final text = selection
+                                            .textInside(message.content);
+                                        editable.hideToolbar();
+                                        onRewrite!(text);
+                                      })
+                              ]),
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(color: textColor, height: 1.5),
+                        ),
                       if (!isUser && message.innerVoice.trim().isNotEmpty) ...[
                         const SizedBox(height: 8),
                         _NpcInnerVoiceDisclosure(

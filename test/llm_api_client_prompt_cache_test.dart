@@ -281,7 +281,8 @@ B|离开
     ).drain<void>();
 
     final userContext = capture.messages.last['content'] as String;
-    expect(userContext, '【已保存快照】旧地点\n\n【用户本轮输入】继续。');
+    expect(userContext, startsWith('【已保存快照】旧地点\n\n【用户本轮输入】继续。'));
+    expect(userContext, contains('【本轮实际提交｜玩家行动范围】'));
     expect(userContext, isNot(contains('会被 replay 遮住的地点')));
   });
 
@@ -375,7 +376,9 @@ B|离开
     final staticPrompt = capture.messages.first['content'] as String;
     final userTurn = capture.messages.last['content'] as String;
     expect(staticPrompt, contains('【主聊天叙事长度｜轻小说正文】'));
-    expect(staticPrompt, contains('目标 2200-3200 个中文字符，下限 2000 字'));
+    expect(staticPrompt, contains('目标 2200-3200 个中文字符'));
+    expect(staticPrompt, contains('玩家决定权优先'));
+    expect(staticPrompt, isNot(contains('下限 2000 字')));
     expect(staticPrompt, contains('正式剧情推进时纯文字剧情正文目标 2200-3200'));
     expect(staticPrompt, contains('HTML、状态块和选项不计入正文长度'));
     expect(userTurn, isNot(contains('正式剧情推进时纯文字剧情正文目标 2200-3200')));

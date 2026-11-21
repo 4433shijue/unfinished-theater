@@ -10,6 +10,7 @@ import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 
 import '../data/gameplay_system_prompt.dart';
+import 'narrative_contract.dart';
 import '../data/simulator_prompt_generator.dart';
 import '../models/app_settings.dart';
 import '../models/character_memory.dart';
@@ -904,6 +905,8 @@ $raw''',
     return '''
 修复 App 回复的格式与协议结构。保留原有剧情事实、人物台词、叙述视角和语气，不续写剧情，不为补格式发明事件或替玩家作选择。
 保留原回复中有效的正文、HTML 和设定信息；只调整放错位置的内容与缺失的结构。事实不足时沿用上一轮状态或保留未知，不把待办和猜测改成已完成。
+${NarrativeContract.agency}
+${NarrativeContract.presentation}
 
 必须满足：
 1. 至少保留一段用户可读正文。
@@ -925,6 +928,8 @@ ${gameplayInstruction.trim()}
         : '';
     return '''
 修复 App 大型群聊回复的协议结构。保留已有事件、原话、语气与人物关系，不续写剧情，不替玩家回答，也不把格式修复变成文风重写。
+${NarrativeContract.agency}
+${NarrativeContract.presentation}
 
 必须满足：
 1. 输出只包含 [GROUP_CHAT] JSON 块、[GAME_STATE] 状态块${gameplayPatchRequired ? '和 [THEATER_PATCH] 变量补丁' : ''}，不要输出 HTML、Markdown 代码块、[BUBBLE]、[CHOICES] 或 [MAP_STATE]。
@@ -1079,6 +1084,8 @@ $originalReply
             contextMessages[index],
             isLatestUserMessage: _isLatestUserMessage(contextMessages, index),
             currentEnvelope: currentEnvelope,
+            turnAuthorization:
+                NarrativeContract.turnAuthorization(contextMessages),
             useCurrentEnvelope: () => currentEnvelopeUsed = true,
             preferExactAssistantReplay: preferExactAssistantReplay,
           ),
@@ -1107,6 +1114,7 @@ $originalReply
     ChatMessage message, {
     required bool isLatestUserMessage,
     required String currentEnvelope,
+    required String turnAuthorization,
     required void Function() useCurrentEnvelope,
     required bool preferExactAssistantReplay,
   }) {
@@ -1123,6 +1131,11 @@ $originalReply
     if (replay != null && replay.isNotEmpty) {
       if (isLatestUserMessage) {
         useCurrentEnvelope();
+        // Older saves predate the authorization block. Preserve their frozen
+        // context and assistant replay; append only this turn's new boundary.
+        if (!replay.contains('【本轮实际提交｜玩家行动范围】')) {
+          return '$replay\n\n$turnAuthorization';
+        }
       }
       return message.role == ChatRole.assistant
           ? NarrativeContent.withoutHtml(replay)
@@ -1745,6 +1758,8 @@ $originalReply
         ..writeln(runtimeAddendum.trim());
     }
 
+    body.writeln(NarrativeContract.turnAuthorization(contextMessages));
+
     final modeAddendum = _buildModeSpecificRuntimeAddendum(
       character,
       contextMessages,
@@ -1932,7 +1947,8 @@ ${character.nextStepOptionsEnabled ? '[CHOICES] 必须且只能包含 A、B、C 
     }
     final buffer = StringBuffer()
       ..writeln('【最终输出格式复核｜生成前最后检查】')
-      ..writeln('如果本轮是角色扮演、文游、模拟器、剧情推进，或用户正在和角色互动，禁止只输出一段纯文字后结束。');
+      ..writeln(
+          '如果本轮是角色扮演、文游、模拟器、剧情推进，或用户正在和角色互动，正文后仍须完成内部结构；在下一次玩家决定前结束正文，不能用字数要求强行推进。');
     if (character.gameplaySystem != null) {
       buffer.writeln(
           '玩法系统已启用：[GAME_STATE] 与 [THEATER_PATCH] 必须在同一条回复中成对出现、分别完整闭合；状态面板不能代替变量补丁，变量补丁也不能代替状态面板。');

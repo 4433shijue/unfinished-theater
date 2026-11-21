@@ -558,7 +558,11 @@ class _NpcChatThreadScreenState extends State<NpcChatThreadScreen> {
                   leading: const Icon(Icons.copy_outlined),
                   title: Text(AppTheme.glitchText('复制')),
                   onTap: () {
-                    Clipboard.setData(ClipboardData(text: message.content));
+                    Clipboard.setData(ClipboardData(
+                        text: message.role == NpcMessageRole.user
+                            ? message.content
+                            : StoryMarkdownDocument.projection(message.content)
+                                .text));
                     Navigator.of(context).pop();
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text(AppTheme.glitchText('已复制'))),
