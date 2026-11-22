@@ -1,6 +1,6 @@
 # 未完剧场 🎭
 
-当前本地开发版为 **v2.14.0**。新增剧情精修、连续记忆与场景管理，见 [使用说明](docs/V2_14_0_GUIDE.md)、[迁移说明](docs/V2_14_0_MIGRATION.md)和[验收报告](docs/V2_14_0_VALIDATION.md)。
+**v3.0.0 · 下一步，由你决定。** 主线以连续的小说段落续写你的选择，保留原有布局和 14 套皮肤。[查看更新记录](CHANGELOG.md) · [下载正式版](https://github.com/4433shijue/unfinished-theater/releases/tag/v3.0.0)
 
 **故事还没写完，先别急着散场。**
 

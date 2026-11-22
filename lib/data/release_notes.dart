@@ -32,24 +32,24 @@ const ReleaseNotes currentReleaseNotes = ReleaseNotes(
   id: 'v3.0.0',
   version: 'V3.0.0',
   title: 'V3.0.0 下一步，由你决定',
-  subtitle: '熟悉的界面，更清楚的叙事边界与正文层次。',
+  subtitle: '故事接着你的选择往下写，下一步留给你。',
   items: [
     ReleaseNoteItem(
         icon: Icons.touch_app_outlined,
         title: '决定权留给你',
-        description: '续写围绕已经提交的行动展开，在下一次需要你回应的位置停下；篇幅通过 NPC 与场景反应展开。'),
+        description: '主线用连续的小说段落写出你这一步的后果。NPC 可以追问或行动，但下一次答应、拒绝或选择留给你。'),
     ReleaseNoteItem(
         icon: Icons.format_color_text,
         title: '对白跟随皮肤',
-        description: '正文隐藏对白的双引号，只给说出口的话上色。浅底用深色，深底用浅色。'),
+        description: '正文隐藏对白的双引号，用皮肤色区分说话和叙述。黑胶往事换成深棕底、暖白旁白和浅金对白。'),
     ReleaseNoteItem(
         icon: Icons.text_fields,
-        title: '文字也有轻重',
-        description: '正文按场景使用 Markdown 强调、轻声、信件引用与小标题；复制、引用和改写继续保留。'),
+        title: '把喜欢的一句留下',
+        description: '选中文字可以摘进已有书签。复制完整对白会恢复原引号，只复制半句不会补引号。'),
     ReleaseNoteItem(
         icon: Icons.palette_outlined,
         title: '熟悉的布局继续用',
-        description: '保留原有页面、皮肤、贴图与六条不同路线。人物私聊使用普通聊天文字。'),
+        description: '原布局和 14 套皮肤都保留。六个选项可多选、预演或单独刷新；NPC 私聊仍是普通线上聊天。'),
   ],
 );
 
