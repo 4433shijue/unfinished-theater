@@ -1,6 +1,16 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 
+/// Marks a rendered paragraph without introducing a layout or storage key.
+class StoryReadingParagraph extends StatelessWidget {
+  const StoryReadingParagraph(
+      {super.key, required this.text, required this.child});
+  final String text;
+  final Widget child;
+  @override
+  Widget build(BuildContext context) => child;
+}
+
 /// Lazy chat list with measured message anchors, shared by main and NPC chats.
 class StoryAnchoredList extends StatefulWidget {
   const StoryAnchoredList(
@@ -13,7 +23,9 @@ class StoryAnchoredList extends StatefulWidget {
       this.savedPosition = const {},
       this.padding = EdgeInsets.zero,
       this.scopeKey = '',
+      this.readingActive,
       this.generating = false});
+  final bool? readingActive;
   final ScrollController controller;
   final List<String> ids;
   final IndexedWidgetBuilder itemBuilder;
@@ -31,6 +43,10 @@ class StoryAnchoredListState extends State<StoryAnchoredList>
     with WidgetsBindingObserver {
   final _keys = <String, GlobalKey>{};
   Timer? _saveTimer;
+  Timer? _cueTimer;
+  ({String id, String text, double y})? _returnPoint;
+  Rect? _cue;
+  int _visit = 0;
   bool _following = true;
   bool _jumping = false;
   bool _newContent = false;
@@ -77,6 +93,22 @@ class StoryAnchoredListState extends State<StoryAnchoredList>
   void didUpdateWidget(StoryAnchoredList oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.scopeKey != widget.scopeKey) {
+      _visit++;
+      _returnPoint = null;
+      _cue = null;
+      _cueTimer?.cancel();
+    } else if (oldWidget.readingActive != widget.readingActive) {
+      final visit = ++_visit;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || visit != _visit) return;
+        if (widget.readingActive == false) {
+          _rememberParagraph();
+        } else if (widget.readingActive == true) {
+          _restoreParagraph(visit);
+        }
+      });
+    }
+    if (oldWidget.scopeKey != widget.scopeKey) {
       _saveTimer?.cancel();
       if (_anchorId != null) {
         oldWidget.onPosition(_anchorId!, _anchorFraction, true);
@@ -107,7 +139,8 @@ class StoryAnchoredListState extends State<StoryAnchoredList>
         if (mounted) jumpToMessage(nearest);
       });
     }
-    if (oldWidget.ids.length != widget.ids.length || widget.generating) {
+    if (widget.readingActive != false &&
+        (oldWidget.ids.length != widget.ids.length || widget.generating)) {
       if (_following) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && !_jumping) goToLatest();
@@ -121,6 +154,7 @@ class StoryAnchoredListState extends State<StoryAnchoredList>
 
   @override
   void dispose() {
+    _cueTimer?.cancel();
     _saveTimer?.cancel();
     _save(true);
     widget.controller.removeListener(_onScroll);
@@ -151,6 +185,7 @@ class StoryAnchoredListState extends State<StoryAnchoredList>
   }
 
   void _onScroll() {
+    if (_cue != null) _clearCue();
     if (_jumping || !_restored || !widget.controller.hasClients) return;
     final atEnd = widget.controller.position.extentAfter < 80;
     if (atEnd != _following || (_newContent && atEnd)) {
@@ -170,6 +205,77 @@ class StoryAnchoredListState extends State<StoryAnchoredList>
       _capturePosition();
       _save(false);
     });
+  }
+
+  List<({String id, String text, Rect rect})> _paragraphs({String? only}) {
+    final viewport = context.findRenderObject() as RenderBox;
+    final result = <({String id, String text, Rect rect})>[];
+    for (final entry in _keys.entries) {
+      if (only != null && entry.key != only) continue;
+      final item = entry.value.currentContext;
+      if (item == null) continue;
+      void visit(Element e) {
+        final w = e.widget;
+        if (w is StoryReadingParagraph) {
+          final box = e.findRenderObject();
+          if (box is RenderBox && box.attached && box.hasSize) {
+            final xy = box.localToGlobal(Offset.zero, ancestor: viewport);
+            result.add((id: entry.key, text: w.text, rect: xy & box.size));
+          }
+        } else {
+          e.visitChildren(visit);
+        }
+      }
+
+      item.visitChildElements(visit);
+    }
+    return result;
+  }
+
+  void _rememberParagraph() {
+    _returnPoint = null;
+    final all = _paragraphs();
+    final height = (context.findRenderObject() as RenderBox).size.height;
+    final p =
+        all.where((p) => p.rect.bottom > 0 && p.rect.top < height).firstOrNull;
+    if (p != null &&
+        all.where((x) => x.id == p.id && x.text == p.text).length == 1) {
+      _returnPoint = (id: p.id, text: p.text, y: p.rect.top);
+    }
+  }
+
+  Future<void> _restoreParagraph(int visit) async {
+    final point = _returnPoint;
+    _returnPoint = null;
+    if (point == null ||
+        !widget.ids.contains(point.id) ||
+        !widget.controller.hasClients) {
+      return;
+    }
+    if (_keys[point.id]?.currentContext == null) await jumpToMessage(point.id);
+    if (!mounted || _visit != visit) return;
+    final matches =
+        _paragraphs(only: point.id).where((p) => p.text == point.text).toList();
+    if (matches.length != 1) return;
+    final r = matches.single.rect, pos = widget.controller.position;
+    final offset = (pos.pixels + r.top - point.y)
+        .clamp(pos.minScrollExtent, pos.maxScrollExtent);
+    final dy = offset - pos.pixels;
+    if (dy.abs() > 1) widget.controller.jumpTo(offset);
+    final y = (r.top - dy)
+        .clamp(0.0, (context.findRenderObject() as RenderBox).size.height);
+    if (r.bottom - dy <= y) return;
+    setState(() => _cue = Rect.fromLTWH(
+        (r.left - 5).clamp(0.0, double.infinity),
+        y,
+        2,
+        (r.bottom - dy - y).clamp(0.0, 36.0)));
+    _cueTimer?.cancel();
+    _cueTimer = Timer(const Duration(milliseconds: 1600), _clearCue);
+  }
+
+  void _clearCue() {
+    if (mounted && _cue != null) setState(() => _cue = null);
   }
 
   void _capturePosition() {
@@ -294,6 +400,13 @@ class StoryAnchoredListState extends State<StoryAnchoredList>
             itemBuilder: (context, index) => KeyedSubtree(
                 key: _keys.putIfAbsent(widget.ids[index], GlobalKey.new),
                 child: widget.itemBuilder(context, index))),
+        if (_cue case final rect?)
+          Positioned.fromRect(
+              rect: rect,
+              child: IgnorePointer(
+                  child: ColoredBox(
+                      key: const ValueKey('story-return-cue'),
+                      color: Theme.of(context).colorScheme.primary))),
         if (_newContent)
           Positioned(
               bottom: 12,

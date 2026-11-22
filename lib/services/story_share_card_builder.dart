@@ -55,9 +55,10 @@ class StoryShareCardBuilder {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>$escapedTitle</title>
   <style>
+    ${StoryMarkdownDocument.exportStyles}
     .content .story-dialogue { color: ${colors['dialogue']}; }
     .content strong { color: ${colors['emphasis']}; font-size: 1.08em; }
-    .content em { color: ${colors['muted']}; font-size: .95em; }
+    .content em { color: ${colors['muted']}; font-size: inherit; }
     .content h1 { font-size: 1.25em; }
     .content h2 { font-size: 1.2em; }
     .content h3, .content h4, .content h5, .content h6 { font-size: 1.15em; }

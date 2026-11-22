@@ -12,6 +12,7 @@ import 'package:ai_roleplay_chat/services/llm_api_client.dart';
 import 'package:ai_roleplay_chat/services/local_store.dart';
 import 'package:ai_roleplay_chat/services/memory_service.dart';
 import 'package:ai_roleplay_chat/theme/app_theme.dart';
+import 'package:ai_roleplay_chat/widgets/chat_message_bubble.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -93,6 +94,43 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('excerpt appends to an existing bookmark only on save',
+      (tester) async {
+    tester.view.physicalSize = const Size(1280, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final c = await _createController(_StoryUtilityClient());
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_testApp(c));
+    await tester.pumpAndSettle();
+    ChatMessageBubble bubble() =>
+        tester.widget<ChatMessageBubble>(find.byType(ChatMessageBubble).first);
+    Future<void> excerpt(String s) async {
+      bubble().onExcerpt!(s);
+      await tester.pumpAndSettle();
+    }
+
+    await excerpt('旧备注');
+    await tester.tap(find.text('保存书签'));
+    await tester.pumpAndSettle();
+    await excerpt('“明晚。”');
+    expect(
+        tester
+            .widget<TextField>(find.descendant(
+                of: find.byType(AlertDialog), matching: find.byType(TextField)))
+            .controller!
+            .text,
+        '旧备注\n\n“明晚。”');
+    await tester.tap(find.text('关闭'));
+    await tester.pumpAndSettle();
+    expect(bubble().message.bookmarkNote, '旧备注');
+    await excerpt('“明晚。”');
+    await tester.tap(find.text('保存书签'));
+    await tester.pumpAndSettle();
+    expect(bubble().message.bookmarkNote, '旧备注\n\n“明晚。”');
+    await tester.pump(const Duration(seconds: 3));
+  });
   testWidgets('game hub no longer owns the NPC inbox', (tester) async {
     tester.view.physicalSize = const Size(1440, 1100);
     tester.view.devicePixelRatio = 1;

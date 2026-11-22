@@ -6,6 +6,85 @@ import 'package:markdown/markdown.dart' as md;
 class StoryMarkdownDocument {
   const StoryMarkdownDocument._();
   static const dialogueTag = 'story-dialogue';
+  static const propLabels = {
+    '来信': 'letter',
+    '纸条': 'note',
+    '短信': 'sms',
+    '广播': 'broadcast'
+  };
+  static const exportStyles = '''
+    .content .story-prop { margin: .7em .25em; padding: .55em .85em; border: 0; border-inline-start: 2px solid currentColor; background: transparent; }
+    .content .story-letter,.content .story-note {border-block: 1px solid currentColor; border-inline-start:0;}
+    .content .story-sms {border:1px solid currentColor; border-radius:8px; width:fit-content; max-width:100%; box-sizing:border-box;}
+    .content .story-prop p {margin:.25em 0;}
+    .content .story-break {border:0; border-top:1px double currentColor; opacity:.55; width:35%; margin:1.2em auto;}
+    .content em,.content .story-dialogue {font-size:inherit;}
+  ''';
+
+  static String? propKind(md.Element node) {
+    if (node.tag != 'blockquote') return null;
+    final first = node.children?.firstOrNull;
+    if (first is! md.Element || first.tag != 'p') return null;
+    final parts = first.children!;
+    final label = parts.firstOrNull;
+    if (label is! md.Element || label.tag != 'strong') return null;
+    if (parts.length == 1 && node.children!.length == 1) return null;
+    if (parts.length > 1 &&
+        !(parts[1].textContent.startsWith('\n') ||
+            (parts[1] is md.Element && (parts[1] as md.Element).tag == 'br'))) {
+      return null;
+    }
+    return propLabels[label.textContent];
+  }
+
+  static bool endsInSpokenParagraph(String source) {
+    final last = nodes(source).lastOrNull;
+    if (last is! md.Element || last.tag != 'p') return false;
+    final value = last.textContent.trim();
+    return _dialogueMarks(value)
+        .pairs
+        .any((p) => p.$1 == 0 && p.$2 == value.length - 1);
+  }
+
+  static String plainText(String source) =>
+      nodes(source).map(plainNode).where((s) => s.isNotEmpty).join('\n\n');
+
+  static String plainNode(md.Node node) {
+    if (node is! md.Element) return node.textContent;
+    if (node.tag == 'br') return '\n';
+    if (node.tag == 'hr') return '';
+    final separator = switch (node.tag) {
+      'blockquote' || 'ul' || 'ol' || 'table' || 'thead' || 'tbody' => '\n',
+      'tr' => '\t',
+      _ => ''
+    };
+    return (node.children ?? []).map(plainNode).join(separator);
+  }
+
+  // Offsets are UTF-16 positions in this selectable, never a global text search.
+  static StoryCopyRun copyRun(md.Node node) {
+    final raw = StringBuffer(), mask = StringBuffer();
+    void visit(md.Node n, bool literal) {
+      if (n is md.Element && n.tag != 'br') {
+        for (final child in n.children ?? <md.Node>[]) {
+          visit(child, literal || n.tag == 'code');
+        }
+      } else {
+        final s = plainNode(n);
+        raw.write(s);
+        mask.write(literal ? '\uFFFC' * s.length : s);
+      }
+    }
+
+    visit(node, false);
+    final text = raw.toString(), marks = _dialogueMarks(mask.toString());
+    final visible = [
+      for (var i = 0; i < text.length; i++)
+        if (!marks.hidden.contains(i)) i
+    ];
+    return StoryCopyRun(text, visible, marks.pairs);
+  }
+
   static final Map<String, StoryTextProjection> _projections = {};
   static final Map<String, List<md.Node>> _trees = {};
 
@@ -219,6 +298,9 @@ class StoryMarkdownDocument {
   static void decorateNodes(List<md.Node> nodes, {bool encoded = false}) {
     void walk(md.Node node) {
       if (node is! md.Element) return;
+      final kind = propKind(node);
+      if (kind != null) node.attributes['class'] = 'story-prop story-$kind';
+      if (node.tag == 'hr') node.attributes['class'] = 'story-break';
       if ({'p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'td', 'th'}
           .contains(node.tag)) {
         decorateInline(node, encoded: encoded);
@@ -232,6 +314,27 @@ class StoryMarkdownDocument {
     for (final node in nodes) {
       walk(node);
     }
+  }
+}
+
+class StoryCopyRun {
+  const StoryCopyRun(this.raw, this.visible, this.pairs);
+  final String raw;
+  final List<int> visible;
+  final List<(int, int)> pairs;
+  String slice(int from, int to) {
+    if (from < 0 || to > visible.length || from >= to) return '';
+    final retain = visible.sublist(from, to).toSet();
+    final left = from == 0 ? -1 : visible[from - 1];
+    final right = to == visible.length ? raw.length : visible[to];
+    for (final (a, b) in pairs) {
+      if (a > left && b < right && a < visible[to - 1] && b > visible[from]) {
+        retain
+          ..add(a)
+          ..add(b);
+      }
+    }
+    return String.fromCharCodes((retain.toList()..sort()).map(raw.codeUnitAt));
   }
 }
 

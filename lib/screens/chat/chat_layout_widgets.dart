@@ -2304,7 +2304,8 @@ class _BookmarkDraft {
 }
 
 class _BookmarkDialog extends StatefulWidget {
-  const _BookmarkDialog({required this.message});
+  const _BookmarkDialog({required this.message, this.excerpt});
+  final String? excerpt;
 
   final ChatMessage message;
 
@@ -2320,8 +2321,11 @@ class _BookmarkDialogState extends State<_BookmarkDialog> {
   void initState() {
     super.initState();
     _bookmarked = widget.message.isBookmarked;
-    _noteController =
-        TextEditingController(text: widget.message.bookmarkNote.trim());
+    _noteController = TextEditingController(
+        text: [
+      widget.message.bookmarkNote.trim(),
+      if (widget.excerpt != null) widget.excerpt!.trim()
+    ].where((s) => s.isNotEmpty).join('\n\n'));
   }
 
   @override

@@ -254,6 +254,10 @@ async function smoke(browser, config) {
       await waitText(/我不会擅自拆信/);
       await capture('npc-generated');
       assert.ok(requests.some(t=>t.includes('请生成 NPC 对本次消息') && t.includes('【玩家决定权') && t.includes('纯线上聊天') && !t.includes('【剧情正文的 Markdown 表现】')));
+      const countBeforeReturn=requests.length;
+      await page.getByRole('button',{name:'',exact:true}).first().click();
+      await button('对话').click();await waitText(/寄信人姓沈/);
+      assert.equal(requests.length,countBeforeReturn);await capture('return-to-story');
     }
     assert.deepEqual(errors,[]);
     return {scenario:config.caseName||`${config.theme}-${config.width}`,theme:config.theme,width:config.width,interact:!!config.interact,passed:true,requests:requests.length,errors};
@@ -262,7 +266,8 @@ async function smoke(browser, config) {
     return {scenario:config.caseName||`${config.theme}-${config.width}`,theme:config.theme,width:config.width,passed:false,error:error.stack,errors};
   } finally {await context.close();}
 }
-(async()=>{
+module.exports={open,launch,skinControls};
+if(require.main===module)(async()=>{
   const browser=await launch(); const results=[];
   const configs=process.env.THEATER_SMOKE_ONLY ? [{width:1280,theme:'sakura',interact:process.env.THEATER_SMOKE_ONLY==='journey'}] :
     [{width:1280,theme:'sakura',interact:true},{width:390,theme:'sakura',interact:true},

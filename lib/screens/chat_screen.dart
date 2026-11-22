@@ -456,6 +456,10 @@ class _ChatScreenState extends State<ChatScreen> {
                                 children: <Widget>[
                                   StoryAnchoredList(
                                     key: _storyListKey,
+                                    readingActive:
+                                        controller.currentTabIndex == 0 &&
+                                            (ModalRoute.isCurrentOf(context) ??
+                                                true),
                                     scopeKey: character.id,
                                     ids: history.messages
                                         .map((m) => m.id)
@@ -534,6 +538,8 @@ class _ChatScreenState extends State<ChatScreen> {
                                         onCreateBranch: () =>
                                             _createStoryBranchFromMessage(
                                                 message),
+                                        onExcerpt: (s) =>
+                                            _editBookmark(message, excerpt: s),
                                         onToggleBookmark: () =>
                                             _editBookmark(message),
                                         onDelete: () => _confirmDelete(message),
@@ -829,10 +835,10 @@ class _ChatScreenState extends State<ChatScreen> {
     _showTopNotice(context, '剧情分支已创建，已进入新的可能性。');
   }
 
-  Future<void> _editBookmark(ChatMessage message) async {
+  Future<void> _editBookmark(ChatMessage message, {String? excerpt}) async {
     final result = await showDialog<_BookmarkDraft>(
       context: context,
-      builder: (_) => _BookmarkDialog(message: message),
+      builder: (_) => _BookmarkDialog(message: message, excerpt: excerpt),
     );
     if (!mounted || result == null) {
       return;
@@ -1498,10 +1504,9 @@ class _ChatScreenState extends State<ChatScreen> {
     await Clipboard.setData(ClipboardData(
         text: message.role == ChatRole.user
             ? message.content
-            : StoryMarkdownDocument.projection(
-                    MessageContentParser.contextTextForModel(
-                        message.displayContent))
-                .text));
+            : StoryMarkdownDocument.plainText(
+                MessageContentParser.contextTextForModel(
+                    message.displayContent))));
     if (!mounted) {
       return;
     }

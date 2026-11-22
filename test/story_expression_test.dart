@@ -148,6 +148,9 @@ void main() {
           .reduce((a, b) => a < b ? a : b);
       expect(worst(palette.dialogue), greaterThanOrEqualTo(4.5),
           reason: skin.id);
+      for (final ink in [palette.body, palette.emphasis, palette.muted]) {
+        expect(worst(ink), greaterThanOrEqualTo(4.5), reason: skin.id);
+      }
     }
     AppTheme.themeFor('sakura');
   });

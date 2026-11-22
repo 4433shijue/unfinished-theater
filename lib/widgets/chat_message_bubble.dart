@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'story_markdown.dart';
+import '../services/story_markdown_document.dart';
 
 import '../models/bubble_style.dart';
 import '../models/chat_message.dart';
@@ -49,6 +50,7 @@ class ChatMessageBubble extends StatefulWidget {
     this.onRepairFormat,
     this.onCreateBranch,
     this.onToggleBookmark,
+    this.onExcerpt,
     this.onChoicesSelected,
     this.onPreviewChoice,
     this.onResetChoices,
@@ -86,6 +88,7 @@ class ChatMessageBubble extends StatefulWidget {
   final VoidCallback? onRepairFormat;
   final VoidCallback? onCreateBranch;
   final VoidCallback? onToggleBookmark;
+  final ValueChanged<String>? onExcerpt;
   final ValueChanged<List<String>>? onChoicesSelected;
   final Future<void> Function(MessageChoice choice)? onPreviewChoice;
   final VoidCallback? onResetChoices;
@@ -431,7 +434,19 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
                         icon: const Icon(Icons.refresh),
                         label: const Text('生成六个选项')),
                   if (parsed.choices.isNotEmpty) ...<Widget>[
-                    if (parsed.blocks.isNotEmpty) const SizedBox(height: 12),
+                    if (parsed.blocks.isNotEmpty)
+                      SizedBox(
+                          height: 12 +
+                              (parsed.choices.length == 6 &&
+                                      parsed.blocks.last.type ==
+                                          MessageContentBlockType.markdown &&
+                                      StoryMarkdownDocument
+                                          .endsInSpokenParagraph(
+                                              parsed.blocks.last.content)
+                                  ? (theme.textTheme.bodyLarge?.fontSize ??
+                                          16) *
+                                      .5
+                                  : 0)),
                     _ChoicePanel(
                       key: ValueKey(widget.message.displayContent),
                       onRefresh: widget.onRefreshChoices,
@@ -490,6 +505,7 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
     if (parsed.groupChatMessages.isNotEmpty) {
       return <Widget>[
         _GroupChatMessageFlow(
+          onExcerpt: widget.onExcerpt,
           onQuote: widget.onQuote == null
               ? null
               : () => widget.onQuote!(_storySelectedText),
@@ -535,29 +551,15 @@ class _ChatMessageBubbleState extends State<ChatMessageBubble> {
             selected: false,
             customStyle: widget.customBubbleStyle);
         return _assistantTextBubble(
-          child: SelectionArea(
-            onSelectionChanged: (value) =>
-                _storySelectedText = value?.plainText,
-            contextMenuBuilder: (context, region) =>
-                AdaptiveTextSelectionToolbar.buttonItems(
-                    anchors: region.contextMenuAnchors,
-                    buttonItems: [
-                  ...region.contextMenuButtonItems,
-                  if (widget.onQuote != null)
-                    ContextMenuButtonItem(
-                        label: '接这句',
-                        onPressed: () {
-                          region.hideToolbar();
-                          widget.onQuote!(_storySelectedText);
-                        }),
-                  if (widget.onRewrite != null)
-                    ContextMenuButtonItem(
-                        label: '局部改写',
-                        onPressed: () {
-                          region.hideToolbar();
-                          widget.onRewrite!(_storySelectedText);
-                        })
-                ]),
+          child: StorySelectionArea(
+            onChanged: (value) => _storySelectedText = value,
+            onExcerpt: widget.onExcerpt,
+            onQuote: widget.onQuote == null
+                ? null
+                : () => widget.onQuote!(_storySelectedText),
+            onRewrite: widget.onRewrite == null
+                ? null
+                : () => widget.onRewrite!(_storySelectedText),
             child: StoryMarkdown(
               data: block.content,
               isStreaming: widget.isStreaming,
@@ -2463,6 +2465,7 @@ class _GroupChatMessageFlow extends StatelessWidget {
   const _GroupChatMessageFlow({
     required this.messages,
     required this.npcProfiles,
+    this.onExcerpt,
     this.onMention,
     this.onReply,
     this.onSelectedText,
@@ -2470,6 +2473,7 @@ class _GroupChatMessageFlow extends StatelessWidget {
     this.onRewrite,
   });
 
+  final ValueChanged<String>? onExcerpt;
   final List<GroupChatMessage> messages;
   final List<NpcProfile> npcProfiles;
   final ValueChanged<GroupChatMessage>? onMention;
@@ -2495,6 +2499,7 @@ class _GroupChatMessageFlow extends StatelessWidget {
             onMention: onMention,
             onReply: onReply,
             onSelectedText: onSelectedText,
+            onExcerpt: onExcerpt,
             onQuote: onQuote,
             onRewrite: onRewrite,
           ),
@@ -2534,6 +2539,7 @@ class _GroupChatBubble extends StatelessWidget {
   const _GroupChatBubble({
     required this.message,
     required this.npcProfile,
+    this.onExcerpt,
     required this.replyTarget,
     this.onMention,
     this.onReply,
@@ -2542,6 +2548,7 @@ class _GroupChatBubble extends StatelessWidget {
     this.onRewrite,
   });
 
+  final ValueChanged<String>? onExcerpt;
   final GroupChatMessage message;
   final NpcProfile? npcProfile;
   final GroupChatMessage? replyTarget;
@@ -2686,29 +2693,11 @@ class _GroupChatBubble extends StatelessWidget {
                       ),
                     ],
                     const SizedBox(height: 6),
-                    SelectionArea(
-                      onSelectionChanged: (selection) =>
-                          onSelectedText?.call(selection?.plainText),
-                      contextMenuBuilder: (context, region) =>
-                          AdaptiveTextSelectionToolbar.buttonItems(
-                              anchors: region.contextMenuAnchors,
-                              buttonItems: [
-                            ...region.contextMenuButtonItems,
-                            if (onQuote != null)
-                              ContextMenuButtonItem(
-                                  label: '接这句',
-                                  onPressed: () {
-                                    region.hideToolbar();
-                                    onQuote!();
-                                  }),
-                            if (onRewrite != null)
-                              ContextMenuButtonItem(
-                                  label: '局部改写',
-                                  onPressed: () {
-                                    region.hideToolbar();
-                                    onRewrite!();
-                                  })
-                          ]),
+                    StorySelectionArea(
+                      onChanged: onSelectedText,
+                      onExcerpt: onExcerpt,
+                      onQuote: onQuote,
+                      onRewrite: onRewrite,
                       child: StoryMarkdown(
                         data: message.content,
                         backgrounds: [fill],
