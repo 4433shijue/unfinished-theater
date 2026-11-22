@@ -41,7 +41,7 @@ const ReleaseNotes currentReleaseNotes = ReleaseNotes(
     ReleaseNoteItem(
         icon: Icons.format_color_text,
         title: '对白跟随皮肤',
-        description: '引号里的话自动使用同色系主题色：浅底用深色，深底用浅色，并适配当前气泡底色。'),
+        description: '正文隐藏对白的双引号，只给说出口的话上色。浅底用深色，深底用浅色。'),
     ReleaseNoteItem(
         icon: Icons.text_fields,
         title: '文字也有轻重',
@@ -49,7 +49,7 @@ const ReleaseNotes currentReleaseNotes = ReleaseNotes(
     ReleaseNoteItem(
         icon: Icons.palette_outlined,
         title: '熟悉的布局继续用',
-        description: '保留原有页面、皮肤、贴图与六条不同路线；主线、人物私聊与群聊统一文字表现。'),
+        description: '保留原有页面、皮肤、贴图与六条不同路线。人物私聊使用普通聊天文字。'),
   ],
 );
 

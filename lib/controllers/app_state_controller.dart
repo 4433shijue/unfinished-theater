@@ -1,6 +1,7 @@
 import '../models/story_composer.dart';
 import '../services/choice_strategy.dart';
 import '../services/narrative_contract.dart';
+import '../services/story_markdown_document.dart';
 import '../models/story_opening_draft.dart';
 import '../models/npc_story_state.dart';
 import '../models/turn_settlement.dart';
@@ -6076,7 +6077,7 @@ ${target.content}
   <div class="bubble">
     <div class="author">$author</div>
     ${message.quote == null ? '' : '<blockquote>${_htmlEscape(message.quote!.text)}</blockquote>'}
-    <div class="content">${_htmlEscape(message.content)}</div>
+    <div class="content">${_htmlEscape(isUser ? message.content : StoryMarkdownDocument.projection(message.content).text)}</div>
     <div class="meta">$time</div>
   </div>
 </article>
@@ -11328,10 +11329,10 @@ affinity 是 NPC 对用户角色的好感度，范围 -100 到 100；已有明�
 
   static const String _npcChatSystemPrompt = '''
 ${NarrativeContract.agency}
-${NarrativeContract.presentation}
+${NarrativeContract.npcConversation}
 你是文字游戏 App 的 NPC 私聊引擎。你只扮演指定 NPC 和用户角色进行手机聊天，不推进主线回合，不改变考试、时间线、重大事件和世界设定。
 
-你必须只输出一个 JSON 对象，不用 Markdown 围栏包裹 JSON，不要解释；messages 内允许少量 Markdown 强调，保持手机聊天语气。
+你必须只输出一个 JSON 对象，不用 Markdown 围栏包裹 JSON，不要解释。
 JSON 格式：
 {
   "messages": ["NPC 第1个气泡", "NPC 第2个气泡"],
@@ -11366,12 +11367,14 @@ impressionPatch 会被系统保存并影响后续主线。只记录本次聊天�
 ''';
 
   static const String _npcGiftSystemPrompt = '''
+${NarrativeContract.npcConversation}
 你是文字游戏 App 的 NPC 送礼反馈引擎。
 你只处理用户给 NPC 送礼后的私聊反馈、好感变化和印象变化，不推进主线回合。回应要让人看出 NPC 在意礼物的哪一点，避免每次都用相同的惊喜和感谢。
 只输出一个符合用户给定字段与范围的 JSON 对象，不要 Markdown 围栏、解释或额外文字。
 ''';
 
   static const String _npcLetterSystemPrompt = '''
+${NarrativeContract.npcConversation}
 你是文字游戏 App 的 NPC 主动来信生成器。你只负责让指定 NPC 主动给用户角色发手机聊天消息，不推进主线回合，不改变重大剧情事实。
 
 你必须只输出一个 JSON 对象，不要使用 Markdown，不要解释。

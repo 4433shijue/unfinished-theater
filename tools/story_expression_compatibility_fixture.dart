@@ -24,7 +24,7 @@ void main() {
       File('${dir.path}/v216.json')
           .writeAsStringSync(await c.exportAllDataArchive());
     } else if (mode == 'upgrade') {
-      expect(currentSaveAppVersion, '3.0.0+3001');
+      expect(currentSaveAppVersion, '3.0.0+3002');
       expect(
           await c.importDataArchive(
               File('${dir.path}/v216.json').readAsStringSync(),

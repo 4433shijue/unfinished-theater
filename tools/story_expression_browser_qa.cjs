@@ -97,7 +97,7 @@ async function open(
       content = JSON.stringify(mock.judgment);
     else if (text.includes("请生成 NPC 对本次消息"))
       content = JSON.stringify({
-        messages: ["“**我不会擅自拆信**。”他在等你的答复。"],
+        messages: ["我不会擅自拆信。", "等你回我。"],
         impressionPatch: { summary: "认真回应", affinityDelta: 0 },
       });
     else if (payload.stream)
@@ -223,6 +223,7 @@ async function smoke(browser, config) {
     } else if (config.group) { assert.match(tree,/阿澈/); assert.match(tree,/小舟/); assert.match(tree,/等一等/); }
     else { assert.match(tree,/紫色火漆/); assert.match(tree,/先别走/); assert.match(tree,/阿澈接过/); }
     assert.doesNotMatch(tree,/\*\*先别走\*\*/);
+    assert.doesNotMatch(tree,/“先别走|我见过。”/);
     assert.equal(requests.length,0,'display never generates a model request');
     if (config.interact) {
       const bubble = page.getByLabel(/渡口来信\s+灯下的一封信/).last();
@@ -246,12 +247,13 @@ async function smoke(browser, config) {
       await page.getByRole('group',{name:/^阿 阿澈/}).click({force:true,position:{x:90,y:35}});
       await capture('npc-thread');
       assert.match(await page.locator('body').ariaSnapshot(), /这枚印章/);
+      assert.doesNotMatch(await page.locator('body').ariaSnapshot(), /“这枚印章|我见过。”/);
       await enter('先别拆信，告诉我你认不认识他。');
       await page.getByRole('button',{name:/^(发送|发送消息)$/}).click();
       await button('提交并生成回复').click();
       await waitText(/我不会擅自拆信/);
       await capture('npc-generated');
-      assert.ok(requests.some(t=>t.includes('请生成 NPC 对本次消息') && t.includes('【玩家决定权')));
+      assert.ok(requests.some(t=>t.includes('请生成 NPC 对本次消息') && t.includes('【玩家决定权') && t.includes('纯线上聊天') && !t.includes('【剧情正文的 Markdown 表现】')));
     }
     assert.deepEqual(errors,[]);
     return {scenario:config.caseName||`${config.theme}-${config.width}`,theme:config.theme,width:config.width,interact:!!config.interact,passed:true,requests:requests.length,errors};

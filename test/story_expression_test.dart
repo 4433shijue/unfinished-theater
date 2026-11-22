@@ -90,7 +90,9 @@ void main() {
     await c.queueNpcUserMessage('a', '把信给你看看，但先别答应任何人。');
     expect(await c.requestNpcReply('a'), isNull);
     expect(api.requests.last, contains('【玩家决定权'));
-    expect(api.requests.last, contains('messages 内允许少量 Markdown'));
+    expect(api.requests.last, contains('NPC 私聊｜纯线上聊天'));
+    expect(api.requests.last, contains('不用双引号包住台词'));
+    expect(api.requests.last, isNot(contains('【剧情正文的 Markdown 表现】')));
     expect(api.requests.last, contains('把信给你看看'));
   });
 
@@ -159,10 +161,10 @@ void main() {
   test('ASCII and encoded quotes export without touching inline code', () {
     final html = StoryMarkdownDocument.toHtml(
         '"Wait **here**." &quot;Yes&quot; `"code"`');
-    expect(html, contains('<span class="story-dialogue">&quot;Wait '));
+    expect(html, contains('<span class="story-dialogue">Wait '));
     expect(html, contains('<code>&quot;code&quot;</code>'));
     expect(html, contains('Yes'));
-    expect(html_parser.parseFragment(html).text, '"Wait here." "Yes" "code"');
+    expect(html_parser.parseFragment(html).text, 'Wait here. Yes "code"');
   });
 
   test('group export and share preserve speaker and styled speech', () {
@@ -210,7 +212,8 @@ void main() {
     final found = StoryRewriteService.selectedTargets(targets, '先别走，等一下 & 看我');
     expect(found, hasLength(1));
     final replaced = StoryRewriteService.replace(raw, found.single, '坐一会儿');
-    expect(StoryMarkdownDocument.projection(replaced).text, '他说：“坐一会儿。”');
+    expect(StoryMarkdownDocument.projection(replaced).text, '他说：坐一会儿。');
+    expect(replaced, '他说：“坐一会儿。”');
     expect(replaced, isNot(contains('**')));
   });
   test('partial formatting selection preserves the unselected prefix', () {
@@ -219,6 +222,20 @@ void main() {
         StoryRewriteService.targets('m', raw), '坐下 再说');
     final result = StoryRewriteService.replace(raw, found.single, '听我说');
     expect(result, '**先**听我说。');
+  });
+
+  test('reading, export and selection agree across dialogue boundaries', () {
+    const raw = '他问：“你认得\n**这个名字**吗？”又说：“别急。”';
+    final projected = StoryMarkdownDocument.projection(raw);
+    expect(projected.text, '他问：你认得\n这个名字吗？又说：别急。');
+    final html = html_parser.parseFragment(StoryMarkdownDocument.toHtml(raw));
+    expect(html.text, projected.text);
+    expect(html.querySelectorAll('.story-dialogue').map((e) => e.text).join(),
+        '你认得\n这个名字吗？别急。');
+    final found = StoryRewriteService.selectedTargets(
+        StoryRewriteService.targets('m', raw), '吗？又说：别');
+    final next = StoryRewriteService.replace(raw, found.single, '。他等着。');
+    expect(next, '他问：“你认得\n**这个名字**”。他等着。“急。”');
   });
 
   test('selection across a link or code keeps unselected delimiters valid', () {
@@ -285,6 +302,8 @@ void main() {
     expect('先别走'.allMatches(rich), hasLength(1));
     expect(rich, contains('第一句'));
     expect(rich, contains('他说：'));
+    expect(rich, isNot(contains('“')));
+    expect(rich, isNot(contains('”')));
     expect(rich, contains('旁白。'));
     expect(rich, contains('第二句'));
     expect(rich, contains('『等我』'));

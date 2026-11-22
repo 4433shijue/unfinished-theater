@@ -486,7 +486,9 @@ class _NpcChatThreadScreenState extends State<NpcChatThreadScreen> {
   Future<void> _quoteMessage(NpcChatMessage message, String? selection) async {
     try {
       final quote = await selectStoryQuote(context, message.id, message.content,
-          selection: selection, npcId: widget.npcId);
+          selection: selection,
+          npcId: widget.npcId,
+          userMessage: message.role == NpcMessageRole.user);
       if (mounted && quote != null) _composerKey.currentState?.setQuote(quote);
     } catch (e) {
       if (mounted) {

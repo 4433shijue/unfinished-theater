@@ -30,7 +30,7 @@ void main() {
     await c.updateMessageContent(
         message.id, '$sample\n${fixtures.protocol}\n$options');
     await c.updateNpcMessageContent(
-        'a', c.npcMessagesFor('a').last.id, '“**这枚印章**，我见过。”\n\n*他将信推回灯下。*');
+        'a', c.npcMessagesFor('a').last.id, '“**这枚印章**，我见过。”');
     final prefs = await SharedPreferences.getInstance();
     final data = {for (final key in prefs.getKeys()) key: prefs.get(key)};
     final output = Directory('build/story-expression-qa')

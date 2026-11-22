@@ -81,7 +81,7 @@ extension StoryRewriteController on AppStateController {
               '改写用户选中的一段正文。只返回 JSON：{"replacement":"替换文字","preservesFacts":true,"reason":"判断依据"}。'
               '不输出 HTML 或状态协议。润色时不能改变行动、关系、信息归属或已发生事件；无法确定保持事实时 preservesFacts 必须为 false。'
               '不替玩家决定行动、台词或情感。只输出选中部分，不复制上下文。\n'
-              '${NarrativeContract.agency}\n${NarrativeContract.presentation}',
+              '${NarrativeContract.agency}\n${target.npcId == null ? NarrativeContract.presentation : NarrativeContract.npcConversation}',
           userPrompt:
               '模式：${mode == StoryRewriteMode.polish ? '仅润色' : '改写剧情'}\n要求：$direction\n'
               '人物设定：${target.npcId == null ? character.prompt : npcProfileById(target.npcId!)?.roleCard ?? ''}\n'

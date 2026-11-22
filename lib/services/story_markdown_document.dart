@@ -49,31 +49,47 @@ class StoryMarkdownDocument {
     return result;
   }
 
-  static List<(int, int)> quoteRanges(String text) {
+  static _DialogueMarks _dialogueMarks(String text) {
     const pairs = {'“': '”', '「': '」', '『': '』', '"': '"'};
     final ranges = <(int, int)>[];
-    final stack = <String>[];
+    final hidden = <int>{};
+    final delimiters = <(int, int)>[];
+    final stack = <int>[];
     var start = -1;
+    void finishUnclosed(int boundary) {
+      if (start < 0) return;
+      final lineEnd = text.indexOf(RegExp(r'[\r\n]'), start);
+      final end = lineEnd < 0 || lineEnd > boundary ? boundary : lineEnd;
+      ranges.add((start, end));
+      if (text[start] == '“') hidden.add(start);
+      start = -1;
+      stack.clear();
+    }
+
     for (var i = 0; i < text.length; i++) {
       final c = text[i];
-      if (c == '\n' || c == '\r') {
-        if (start >= 0) ranges.add((start, i));
-        start = -1;
-        stack.clear();
-      } else if (stack.isNotEmpty && c == stack.last) {
-        stack.removeLast();
+      if (c == '\n' && i + 1 < text.length && text[i + 1] == '\n') {
+        finishUnclosed(i);
+      } else if (stack.isNotEmpty && c == pairs[text[stack.last]]) {
+        final opening = stack.removeLast();
+        if (c == '”' || c == '"') {
+          hidden
+            ..add(opening)
+            ..add(i);
+          delimiters.add((opening, i));
+        }
         if (stack.isEmpty) {
           ranges.add((start, i + 1));
           start = -1;
         }
       } else if (pairs.containsKey(c)) {
         if (stack.isEmpty) start = i;
-        stack.add(pairs[c]!);
+        stack.add(i);
       }
     }
     // A streaming or malformed quote is bounded by its paragraph.
-    if (start >= 0) ranges.add((start, text.length));
-    return ranges;
+    finishUnclosed(text.length);
+    return _DialogueMarks(ranges, hidden, delimiters);
   }
 
   /// Called on a block before Markdown's normal renderer visits its children.
@@ -82,6 +98,7 @@ class StoryMarkdownDocument {
   static void decorateInline(md.Element block, {bool encoded = false}) {
     final text = StringBuffer();
     final offsets = <md.Text, int>{};
+    final entityWidths = <int, int>{};
     const blocks = {
       'p',
       'li',
@@ -110,6 +127,7 @@ class StoryMarkdownDocument {
               ? node.text.replaceAllMapped(
                   RegExp(r'&(?:quot|ldquo|rdquo|#34|#x22);'), (m) {
                   final glyph = html.parseFragment(m[0]!).text ?? m[0]!;
+                  entityWidths[offsets[node]! + m.start] = m[0]!.length;
                   return glyph.padRight(m[0]!.length, '\u200B');
                 })
               : node.text);
@@ -136,17 +154,12 @@ class StoryMarkdownDocument {
 
     collect(block.children);
     final combined = text.toString();
-    final ranges = quoteRanges(combined).map((range) {
-      var end = range.$2;
-      // The placeholder preserves entity offsets. Include all of a closing
-      // entity too; splitting after its first byte would expose `quot;`.
-      if (encoded) {
-        while (end < combined.length && combined[end] == '\u200B') {
-          end++;
-        }
-      }
-      return (range.$1, end);
-    }).toList();
+    final marks = _dialogueMarks(combined);
+    final ranges = marks.ranges;
+    final hidden = <int>{
+      for (final i in marks.hidden)
+        for (var j = 0; j < (entityWidths[i] ?? 1); j++) i + j
+    };
     if (ranges.isEmpty) return;
     void replace(List<md.Node>? nodes) {
       if (nodes == null) return;
@@ -157,13 +170,19 @@ class StoryMarkdownDocument {
           var cursor = 0;
           for (final range in ranges) {
             final from = (range.$1 - base).clamp(0, node.text.length);
-            final to = (range.$2 - base).clamp(0, node.text.length);
+            final to = (range.$2 + (entityWidths[range.$2 - 1] ?? 1) - 1 - base)
+                .clamp(0, node.text.length);
             if (to <= from) continue;
             if (cursor < from) {
               result.add(md.Text(node.text.substring(cursor, from)));
             }
-            result.add(
-                md.Element.text(dialogueTag, node.text.substring(from, to)));
+            final speech = String.fromCharCodes([
+              for (var i = from; i < to; i++)
+                if (!hidden.contains(base + i)) node.text.codeUnitAt(i)
+            ]);
+            if (speech.isNotEmpty) {
+              result.add(md.Element.text(dialogueTag, speech));
+            }
             cursor = to;
           }
           if (cursor < node.text.length) {
@@ -216,6 +235,12 @@ class StoryMarkdownDocument {
   }
 }
 
+class _DialogueMarks {
+  const _DialogueMarks(this.ranges, this.hidden, this.pairs);
+  final List<(int, int)> ranges, pairs;
+  final Set<int> hidden;
+}
+
 class StorySourceRange {
   const StorySourceRange(this.start, this.end);
   final int start, end;
@@ -241,6 +266,7 @@ class StoryTextProjection {
     final text = StringBuffer();
     final starts = <int>[], ends = <int>[];
     final formats = <_FormatRange>[];
+    final codeOffsets = <int>{};
     void emit(String value, int start, int end) {
       text.write(value);
       for (var i = 0; i < value.length; i++) {
@@ -287,6 +313,7 @@ class StoryTextProjection {
           if (end >= 0 && end < until) {
             formats.add(_FormatRange(i, end + marker.length, marker));
             for (var j = i + marker.length; j < end; j++) {
+              codeOffsets.add(text.length);
               emit(source[j], j, j + 1);
             }
             i = end + marker.length;
@@ -340,8 +367,32 @@ class StoryTextProjection {
     }
 
     scan(0, source.length);
+    final projected = text.toString();
+    final marks = StoryMarkdownDocument._dialogueMarks(codeOffsets.isEmpty
+        ? projected
+        : String.fromCharCodes([
+            for (var i = 0; i < projected.length; i++)
+              codeOffsets.contains(i) ? 0xfffc : projected.codeUnitAt(i)
+          ]));
+    if (marks.hidden.isEmpty) {
+      return StoryTextProjection._(source, projected, starts, ends, formats);
+    }
+    for (final (left, right) in marks.pairs) {
+      formats.add(_FormatRange(
+          starts[left], ends[right], source.substring(starts[left], ends[left]),
+          closingMarker: source.substring(starts[right], ends[right])));
+    }
+    formats.sort((a, b) => a.start.compareTo(b.start));
+    final visible = [
+      for (var i = 0; i < projected.length; i++)
+        if (!marks.hidden.contains(i)) i
+    ];
     return StoryTextProjection._(
-        source, text.toString(), starts, ends, formats);
+        source,
+        String.fromCharCodes(visible.map(projected.codeUnitAt)),
+        [for (final i in visible) starts[i]],
+        [for (final i in visible) ends[i]],
+        formats);
   }
 
   List<StorySourceRange> occurrences(String selection) {

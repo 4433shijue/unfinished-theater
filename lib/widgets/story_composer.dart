@@ -450,12 +450,18 @@ class _PrivateNoteDialogState extends State<_PrivateNoteDialog> {
 
 Future<StoryQuote?> selectStoryQuote(
     BuildContext context, String messageId, String raw,
-    {String? selection, String? npcId}) async {
+    {String? selection, String? npcId, bool userMessage = false}) async {
   final app = context.read<AppStateController>();
   final worldId = app.currentCharacter?.id;
   String? text = selection?.trim();
   if (text == null || text.isEmpty) {
     final targets = StoryRewriteService.targets(messageId, raw, npcId: npcId);
+    final paragraphs = userMessage
+        ? [raw]
+        : [
+            for (final target in targets)
+              StoryMarkdownDocument.projection(target.selectedText).text
+          ];
     text = await showDialog<String>(
         context: context,
         builder: (context) => AlertDialog(
@@ -464,15 +470,10 @@ Future<StoryQuote?> selectStoryQuote(
                     width: 560,
                     child: SingleChildScrollView(
                         child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      for (final t in targets)
+                      for (final paragraph in paragraphs)
                         ListTile(
-                            title: Text(
-                                StoryMarkdownDocument.projection(t.selectedText)
-                                    .text),
-                            onTap: () => Navigator.pop(
-                                context,
-                                StoryMarkdownDocument.projection(t.selectedText)
-                                    .text))
+                            title: Text(paragraph),
+                            onTap: () => Navigator.pop(context, paragraph))
                     ]))),
                 actions: [
                   TextButton(

@@ -2,14 +2,9 @@ part of '../npc_chats_screen.dart';
 
 class _NpcStoryContent extends StatefulWidget {
   const _NpcStoryContent(
-      {required this.content,
-      this.style,
-      required this.backgrounds,
-      this.onQuote,
-      this.onRewrite});
+      {required this.content, this.style, this.onQuote, this.onRewrite});
   final String content;
   final TextStyle? style;
-  final List<Color> backgrounds;
   final ValueChanged<String>? onQuote, onRewrite;
   @override
   State<_NpcStoryContent> createState() => _NpcStoryContentState();
@@ -40,10 +35,8 @@ class _NpcStoryContentState extends State<_NpcStoryContent> {
                         widget.onRewrite!(_selection);
                       }),
               ]),
-      child: StoryMarkdown(
-          data: widget.content,
-          style: widget.style,
-          backgrounds: widget.backgrounds));
+      child: Text(StoryMarkdownDocument.projection(widget.content).text,
+          style: widget.style));
 }
 
 class _NpcMessageBubble extends StatelessWidget {
@@ -148,8 +141,6 @@ class _NpcMessageBubble extends StatelessWidget {
                               .textTheme
                               .bodyMedium
                               ?.copyWith(color: textColor, height: 1.5),
-                          backgrounds: bubbleDecoration.gradient?.colors ??
-                              [bubbleDecoration.color ?? AppTheme.panel],
                           onQuote: onQuote,
                           onRewrite: onRewrite,
                         )

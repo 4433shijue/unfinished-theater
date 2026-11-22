@@ -1683,7 +1683,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _quoteMessage(ChatMessage message, String? selection) async {
     try {
       final quote = await selectStoryQuote(context, message.id, message.content,
-          selection: selection);
+          selection: selection, userMessage: message.role == ChatRole.user);
       if (mounted && quote != null) {
         if (context
                 .read<AppStateController>()

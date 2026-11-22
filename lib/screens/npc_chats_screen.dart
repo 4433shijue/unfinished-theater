@@ -1,4 +1,3 @@
-import '../widgets/story_markdown.dart';
 import '../services/story_markdown_document.dart';
 import '../widgets/story_composer.dart';
 import '../widgets/story_addressing_dialog.dart';
@@ -680,7 +679,13 @@ class _NpcLetterTile extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         AppTheme.glitchText(
-                          latest?.content ?? '还没有收到来信。',
+                          latest == null
+                              ? '还没有收到来信。'
+                              : latest.role == NpcMessageRole.user
+                                  ? latest.content
+                                  : StoryMarkdownDocument.projection(
+                                          latest.content)
+                                      .text,
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
