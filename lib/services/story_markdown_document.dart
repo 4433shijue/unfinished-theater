@@ -6,36 +6,10 @@ import 'package:markdown/markdown.dart' as md;
 class StoryMarkdownDocument {
   const StoryMarkdownDocument._();
   static const dialogueTag = 'story-dialogue';
-  static const propLabels = {
-    '来信': 'letter',
-    '纸条': 'note',
-    '短信': 'sms',
-    '广播': 'broadcast'
-  };
   static const exportStyles = '''
-    .content .story-prop { margin: .7em .25em; padding: .55em .85em; border: 0; border-inline-start: 2px solid currentColor; background: transparent; }
-    .content .story-letter,.content .story-note {border-block: 1px solid currentColor; border-inline-start:0;}
-    .content .story-sms {border:1px solid currentColor; border-radius:8px; width:fit-content; max-width:100%; box-sizing:border-box;}
-    .content .story-prop p {margin:.25em 0;}
     .content .story-break {border:0; border-top:1px double currentColor; opacity:.55; width:35%; margin:1.2em auto;}
     .content em,.content .story-dialogue {font-size:inherit;}
   ''';
-
-  static String? propKind(md.Element node) {
-    if (node.tag != 'blockquote') return null;
-    final first = node.children?.firstOrNull;
-    if (first is! md.Element || first.tag != 'p') return null;
-    final parts = first.children!;
-    final label = parts.firstOrNull;
-    if (label is! md.Element || label.tag != 'strong') return null;
-    if (parts.length == 1 && node.children!.length == 1) return null;
-    if (parts.length > 1 &&
-        !(parts[1].textContent.startsWith('\n') ||
-            (parts[1] is md.Element && (parts[1] as md.Element).tag == 'br'))) {
-      return null;
-    }
-    return propLabels[label.textContent];
-  }
 
   static bool endsInSpokenParagraph(String source) {
     final last = nodes(source).lastOrNull;
@@ -298,8 +272,6 @@ class StoryMarkdownDocument {
   static void decorateNodes(List<md.Node> nodes, {bool encoded = false}) {
     void walk(md.Node node) {
       if (node is! md.Element) return;
-      final kind = propKind(node);
-      if (kind != null) node.attributes['class'] = 'story-prop story-$kind';
       if (node.tag == 'hr') node.attributes['class'] = 'story-break';
       if ({'p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'td', 'th'}
           .contains(node.tag)) {

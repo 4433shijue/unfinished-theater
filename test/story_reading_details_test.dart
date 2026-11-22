@@ -7,29 +7,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:html/parser.dart' as html;
 
 void main() {
-  test('only an explicit complete blockquote label creates a prop', () {
-    for (final label in StoryMarkdownDocument.propLabels.keys) {
+  test('old labelled quotations remain ordinary Markdown with their full text',
+      () {
+    for (final label in ['来信', '纸条', '短信', '广播']) {
       final src = '> **$label**\n> 第一行\n>\n> 第二行';
-      final kind = StoryMarkdownDocument.propLabels[label];
-      expect(
-          html
-              .parseFragment(StoryMarkdownDocument.toHtml(src))
-              .querySelector('blockquote.story-$kind')
-              ?.text,
-          contains('第二行'));
-    }
-    for (final src in [
-      '> 普通引用',
-      '> **来信**',
-      '> **来信**不是道具',
-      '正文里有**短信**',
-      '\x60\x60\x60\n> **纸条**\n> Hi\n\x60\x60\x60'
-    ]) {
-      expect(
-          html
-              .parseFragment(StoryMarkdownDocument.toHtml(src))
-              .querySelector('.story-prop'),
-          isNull);
+      final quote = html
+          .parseFragment(StoryMarkdownDocument.toHtml(src))
+          .querySelector('blockquote')!;
+      expect(quote.classes, isEmpty);
+      expect(quote.text, contains(label));
+      expect(quote.text, contains('第二行'));
     }
     expect(
         html
@@ -66,7 +53,7 @@ void main() {
       expect(t.element(find.byType(StoryReadingParagraph).first), same(first));
     }
     await t.pumpWidget(page('> **来信**\n> “等我。”', false));
-    expect(find.byKey(const ValueKey('story-prop-letter-0')), findsOneWidget);
+    expect(find.textContaining('等我。', findRichText: true), findsWidgets);
     expect(t.takeException(), isNull);
   });
   testWidgets('native copy keeps repeated speech and paragraph boundaries',

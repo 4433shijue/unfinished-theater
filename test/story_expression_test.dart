@@ -74,6 +74,8 @@ void main() {
       final authorization =
           current.split('【本轮实际提交｜玩家行动范围】').last.split('【本轮提交结束】').first;
       expect(system, contains('玩家决定权'));
+      expect(system, contains('连续的小说自然段'));
+      expect(system, isNot(contains('> **来信**')));
       expect(system, contains('即使尚未达到字数目标'));
       expect(authorization, contains('我把信递给他'));
       expect(authorization, contains('先不递信'));

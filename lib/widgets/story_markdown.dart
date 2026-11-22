@@ -222,7 +222,6 @@ class _CachedStoryBodyState extends State<_CachedStoryBody>
         StoryMarkdownDocument.nodes(widget.data, cache: !widget.streaming);
     final sheet = widget.styleSheet, ink = widget.palette;
     final children = <Widget>[];
-    var propIndex = 0;
     Widget render(md.Node node) {
       if (node is md.Element && node.tag == 'hr') {
         final color = ink.dialogue.withValues(alpha: .6);
@@ -241,25 +240,8 @@ class _CachedStoryBodyState extends State<_CachedStoryBody>
                         child: const SizedBox(width: 100, height: 4)))));
       }
       if (node is md.Element && node.tag == 'blockquote') {
-        final kind = StoryMarkdownDocument.propKind(node);
-        final line = BorderSide(color: ink.dialogue.withValues(alpha: .65));
-        final paper = kind == 'letter' || kind == 'note', sms = kind == 'sms';
-        return Container(
-            key: kind == null
-                ? null
-                : ValueKey('story-prop-$kind-${propIndex++}'),
-            margin: EdgeInsets.symmetric(horizontal: paper ? 6 : 0),
-            padding:
-                EdgeInsets.symmetric(horizontal: 12, vertical: sms ? 5 : 8),
-            decoration: kind == null
-                ? sheet.blockquoteDecoration
-                : BoxDecoration(
-                    border: paper
-                        ? Border(top: line, bottom: line)
-                        : sms
-                            ? Border.fromBorderSide(line)
-                            : Border(left: line.copyWith(width: 3)),
-                    borderRadius: sms ? BorderRadius.circular(8) : null),
+        return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
