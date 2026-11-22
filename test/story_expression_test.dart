@@ -146,16 +146,41 @@ void main() {
       double worst(Color c) => opaque
           .map((s) => StoryTextPalette.contrast(c, s))
           .reduce((a, b) => a < b ? a : b);
-      // Vinyl intentionally combines pale paper and dark translucent edges;
-      // if 4.5 is impossible, the chosen hue must beat both neutral extremes.
-      final neutral = worst(Colors.black) > worst(Colors.white)
-          ? worst(Colors.black)
-          : worst(Colors.white);
-      expect(worst(palette.dialogue),
-          greaterThanOrEqualTo(neutral < 4.5 ? neutral : 4.5),
+      expect(worst(palette.dialogue), greaterThanOrEqualTo(4.5),
           reason: skin.id);
     }
     AppTheme.themeFor('sakura');
+  });
+
+  test('vinyl story ink stays legible across the sleeve and its texture', () {
+    AppTheme.themeFor('vinyl_memories');
+    addTearDown(() => AppTheme.themeFor('sakura'));
+    for (final frame in ['frame_default', 'frame_film_strip']) {
+      final stops = ChatMessageBubble.assistantBackgrounds(frame, null);
+      final ink = StoryTextPalette.resolve(backgrounds: stops);
+      expect(ink.body, isNot(ink.dialogue));
+      expect(ink.dialogue.r, greaterThan(ink.dialogue.b));
+      for (final backdrop in [Colors.black, Colors.white]) {
+        for (var i = 1; i < stops.length; i++) {
+          for (final t in [0.0, .25, .5, .75, 1.0]) {
+            final bg = StoryTextPalette.opaque(
+                Color.lerp(stops[i - 1], stops[i], t)!, backdrop);
+            for (final color in [
+              ink.body,
+              ink.dialogue,
+              ink.emphasis,
+              ink.muted
+            ]) {
+              expect(StoryTextPalette.contrast(color, bg),
+                  greaterThanOrEqualTo(4.5),
+                  reason: '$frame / $backdrop / $i / $t');
+              expect(
+                  color.computeLuminance(), greaterThan(bg.computeLuminance()));
+            }
+          }
+        }
+      }
+    }
   });
 
   test('ASCII and encoded quotes export without touching inline code', () {

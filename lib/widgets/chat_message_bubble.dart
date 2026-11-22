@@ -1783,18 +1783,7 @@ class _CosmeticBubbleStyle {
                               ],
                             )
                           : AppTheme.isVinylMode
-                              ? LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: <Color>[
-                                    const Color(0xFFF8E7C8)
-                                        .withValues(alpha: 0.96),
-                                    const Color(0xFFE6C68E)
-                                        .withValues(alpha: 0.84),
-                                    const Color(0xFF9B6038)
-                                        .withValues(alpha: 0.18),
-                                  ],
-                                )
+                              ? AppTheme.defaultAssistantBubbleGradient
                               : LinearGradient(
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,

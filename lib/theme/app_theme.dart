@@ -628,7 +628,7 @@ class AppTheme {
       : isPastureMode
           ? const Color(0xFF274C55)
           : isVinylMode
-              ? const Color(0xFF3D2B1E)
+              ? const Color(0xFFFFF4E5)
               : isBasicPaletteMode
                   ? const Color(0xFF2C282A)
                   : Colors.white;
@@ -1488,13 +1488,13 @@ class AppTheme {
       );
     }
     if (isVinylMode) {
-      return LinearGradient(
+      return const LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
         colors: <Color>[
-          const Color(0xFFF8E7C8).withValues(alpha: 0.96),
-          const Color(0xFFE6C68E).withValues(alpha: 0.84),
-          const Color(0xFF9B6038).withValues(alpha: 0.18),
+          Color(0xEF39291F),
+          Color(0xEF302219),
+          Color(0xEB261B16),
         ],
       );
     }
